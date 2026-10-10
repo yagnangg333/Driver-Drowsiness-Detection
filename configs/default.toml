@@ -1,0 +1,55 @@
+# Default configuration. Every value here matches the built-in default, so
+# copy this file and change only what you need:
+#   drowsiness run --config configs/my_settings.toml
+# Relative paths are resolved from the project root.
+
+[camera]
+index = 0
+width = 640
+height = 480
+mirror = true                       # selfie view for live cameras
+
+[landmarker]
+model_path = "models/face_landmarker.task"
+max_faces = 2                       # the largest face is tracked as the driver
+min_detection_confidence = 0.5
+min_presence_confidence = 0.5
+min_tracking_confidence = 0.5
+
+[calibration]
+enabled = true
+duration_s = 5.0                    # look ahead with eyes open for this long
+min_samples = 30
+ear_closed_ratio = 0.75             # closed = EAR below 75% of the open-eye EAR
+min_ear_threshold = 0.12
+max_ear_threshold = 0.30
+
+[indicators]
+default_ear_threshold = 0.21        # used when calibration is off or fails
+perclos_window_s = 20.0
+perclos_max = 0.4                   # PERCLOS mapped to an eye score of 1
+microsleep_s = 1.5                  # continuous closure mapped to an eye score of 1
+yawn_mar_threshold = 0.5
+yawn_min_duration_s = 1.5
+yawn_window_s = 60.0
+yawns_for_max = 3                   # yawns within the window for a yawn score of 1
+head_pitch_threshold_deg = 15.0     # forward nod, relative to the calibrated pose
+head_roll_threshold_deg = 20.0      # sideways tilt, relative to the calibrated pose
+head_tilt_max_s = 2.0               # tilt duration mapped to a head score of 1
+
+[fusion]
+eye_weight = 0.5
+yawn_weight = 0.2
+head_weight = 0.3
+
+[alerts]
+level1_threshold = 0.25             # on-screen warning
+level2_threshold = 0.45             # audio alarm
+level3_threshold = 0.65             # critical, persistent
+hysteresis = 0.05
+escalate_after_s = 5.0              # alarm held this long escalates to critical
+level3_hold_s = 5.0
+no_face_warning_s = 3.0
+sound_enabled = true
+sound_path = "assets/alarm.wav"
+log_dir = "logs"
