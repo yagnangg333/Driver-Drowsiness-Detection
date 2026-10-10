@@ -3,6 +3,10 @@
 For the first few seconds the driver looks at the road with eyes open. The
 median signals over that period become the baseline, so thresholds adapt to
 each driver's eye shape, glasses and camera placement.
+
+A baseline that is not plausible for open eyes looking ahead (for example the
+driver was already drowsy, or looking down at the phone) is rejected and
+calibration restarts, so a bad start cannot silently weaken detection.
 """
 
 from __future__ import annotations
@@ -34,12 +38,9 @@ class Calibrator:
     def __init__(self, config: CalibrationConfig, default_ear_threshold: float):
         self._config = config
         self._default = Baseline(ear_threshold=default_ear_threshold)
-        self._start: float | None = None
-        self._now = 0.0
-        self._ears: list[float] = []
-        self._mars: list[float] = []
-        self._pitches: list[float] = []
-        self._rolls: list[float] = []
+        self.attempts = 0
+        self.note: str | None = None  # why the last attempt was rejected
+        self._restart(None)
         self.result: Baseline | None = None if config.enabled else self._default
 
     @property
@@ -71,12 +72,13 @@ class Calibrator:
 
         enough_time = self._elapsed >= self._config.duration_s
         if enough_time and len(self._ears) >= self._config.min_samples:
-            self.result = self._compute()
+            self._finish_attempt(timestamp)
         elif self._elapsed >= self._config.duration_s * _TIMEOUT_FACTOR:
             log.warning(
                 "Calibration timed out with %d face samples; using default thresholds",
                 len(self._ears),
             )
+            self.note = "no face seen during calibration; using default thresholds"
             self.result = self._default
         return self.result
 
@@ -84,13 +86,57 @@ class Calibrator:
     def _elapsed(self) -> float:
         return 0.0 if self._start is None else self._now - self._start
 
+    def _restart(self, timestamp: float | None) -> None:
+        self._start = timestamp
+        self._now = timestamp or 0.0
+        self._ears: list[float] = []
+        self._mars: list[float] = []
+        self._pitches: list[float] = []
+        self._rolls: list[float] = []
+
+    def _finish_attempt(self, timestamp: float) -> None:
+        candidate = self._compute()
+        problem = self._implausible(candidate)
+        self.attempts += 1
+        if problem is None:
+            self.note = None
+            self.result = candidate
+            log.info(
+                "Calibrated: open-eye EAR %.3f -> threshold %.3f, neutral pitch %.1f, roll %.1f",
+                candidate.ear,
+                candidate.ear_threshold,
+                candidate.pitch,
+                candidate.roll,
+            )
+        elif self.attempts >= self._config.max_attempts:
+            self.note = f"calibration failed ({problem}); using default thresholds"
+            log.warning(
+                "Calibration rejected %d times (%s); using defaults", self.attempts, problem
+            )
+            self.result = self._default
+        else:
+            self.note = f"{problem}; please look ahead with eyes open"
+            log.warning("Calibration attempt %d rejected: %s", self.attempts, problem)
+            self._restart(timestamp)
+
+    def _implausible(self, baseline: Baseline) -> str | None:
+        cfg = self._config
+        assert baseline.ear is not None
+        if baseline.ear < cfg.min_open_ear:
+            return f"eyes look closed (EAR {baseline.ear:.2f} < {cfg.min_open_ear:.2f})"
+        if baseline.ear > cfg.max_open_ear:
+            return f"unusual eye shape reading (EAR {baseline.ear:.2f} > {cfg.max_open_ear:.2f})"
+        if abs(baseline.pitch) > cfg.max_neutral_pitch_deg:
+            return f"head not facing ahead (pitch {baseline.pitch:+.0f} deg)"
+        return None
+
     def _compute(self) -> Baseline:
         cfg = self._config
         ear = statistics.median(self._ears)
         threshold = min(
             max(ear * cfg.ear_closed_ratio, cfg.min_ear_threshold), cfg.max_ear_threshold
         )
-        baseline = Baseline(
+        return Baseline(
             ear_threshold=threshold,
             ear=ear,
             mar=statistics.median(self._mars),
@@ -98,11 +144,3 @@ class Calibrator:
             roll=statistics.median(self._rolls) if self._rolls else 0.0,
             calibrated=True,
         )
-        log.info(
-            "Calibrated: open-eye EAR %.3f -> threshold %.3f, neutral pitch %.1f, roll %.1f",
-            ear,
-            threshold,
-            baseline.pitch,
-            baseline.roll,
-        )
-        return baseline

@@ -57,7 +57,7 @@ def draw(frame: np.ndarray, report: FrameReport, fps: float | None = None) -> np
         cv2.polylines(frame, [points[list(INNER_LIPS)]], True, mouth_color, 1, cv2.LINE_AA)
 
     if report.calibrating:
-        _draw_calibration(frame, report.calibration_progress)
+        _draw_calibration(frame, report.calibration_progress, report.calibration_note)
     else:
         _draw_hud(frame, report)
         _draw_banner(frame, report)
@@ -73,7 +73,7 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
         f"EAR  {s.ear:.3f}" if s else "EAR  --",
         f"MAR  {s.mar:.3f}" if s else "MAR  --",
         f"Pitch {pose.pitch:+.0f}  Roll {pose.roll:+.0f}" if pose else "Pose --",
-        f"PERCLOS {report.eye.perclos * 100:.0f}%",
+        f"Eyes closed {report.eye.perclos * 100:.0f}%",
     ]
     _panel(frame, (8, 8), (205, 20 + 20 * len(lines) + 3 * 18))
     y = 28
@@ -98,20 +98,21 @@ def _draw_banner(frame: np.ndarray, report: FrameReport) -> None:
         AlertLevel.ALARM: "DROWSY - take a break",
         AlertLevel.CRITICAL: "WAKE UP!",
     }[level]
-    if not report.face_detected and level == AlertLevel.WARNING:
-        text = "Face not visible"
-    elif not report.face_detected and level == AlertLevel.NONE:
-        text = "Looking for face..."
+    if not report.face_detected:
+        text = "Looking for face..." if level == AlertLevel.NONE else "FACE NOT VISIBLE"
     cv2.rectangle(frame, (0, h - 36), (w, h), LEVEL_COLORS[level], -1)
     _text(frame, f"{text}   score {report.fusion.score:.2f}", (12, h - 12), 0.65, thickness=2)
     if level == AlertLevel.CRITICAL:
         cv2.rectangle(frame, (0, 0), (w - 1, h - 1), LEVEL_COLORS[level], 6)
 
 
-def _draw_calibration(frame: np.ndarray, progress: float) -> None:
+def _draw_calibration(frame: np.ndarray, progress: float, note: str | None = None) -> None:
     h, w = frame.shape[:2]
     _panel(frame, (0, h - 60), (w, 60))
     _text(frame, "Calibrating: look at the road with eyes open", (12, h - 36), 0.55)
+    if note:
+        _panel(frame, (0, h - 90), (w, 30))
+        cv2.putText(frame, note[:70], (12, h - 70), _FONT, 0.45, (80, 200, 255), 1, cv2.LINE_AA)
     cv2.rectangle(frame, (12, h - 22), (w - 12, h - 12), WHITE, 1)
     cv2.rectangle(frame, (12, h - 22), (12 + int((w - 24) * progress), h - 12), GREEN, -1)
 

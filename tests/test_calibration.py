@@ -31,8 +31,33 @@ def test_baseline_from_open_eyes():
 
 def test_threshold_is_clamped():
     cal = Calibrator(CalibrationConfig(duration_s=1.0), default_ear_threshold=0.21)
-    _feed(cal, 1.5, _signals(ear=0.6))
+    _feed(cal, 1.5, _signals(ear=0.42))  # 0.42 * 0.75 = 0.315 > max 0.30
     assert cal.result.ear_threshold == CalibrationConfig().max_ear_threshold
+
+
+def test_closed_eyes_are_rejected_and_calibration_restarts():
+    cal = Calibrator(CalibrationConfig(duration_s=1.0), default_ear_threshold=0.21)
+    t = _feed(cal, 1.2, _signals(ear=0.11))  # driver already drowsy; rejected at ~1.0 s
+    assert not cal.done
+    assert "eyes look closed" in cal.note
+    _feed(cal, 1.5, _signals(ear=0.32), start=t)  # then opens eyes properly
+    assert cal.done and cal.result.calibrated
+    assert cal.result.ear == pytest.approx(0.32)  # rejected samples were discarded
+    assert cal.note is None
+
+
+def test_looking_down_is_rejected():
+    cal = Calibrator(CalibrationConfig(duration_s=1.0), default_ear_threshold=0.21)
+    _feed(cal, 1.5, _signals(pitch=35.0))
+    assert not cal.done and "head not facing ahead" in cal.note
+
+
+def test_repeated_rejection_falls_back_to_defaults_with_note():
+    cal = Calibrator(CalibrationConfig(duration_s=1.0, max_attempts=2), default_ear_threshold=0.21)
+    _feed(cal, 3.0, _signals(ear=0.11))
+    assert cal.done and not cal.result.calibrated
+    assert cal.result.ear_threshold == 0.21
+    assert "calibration failed" in cal.note
 
 
 def test_no_face_falls_back_to_defaults():

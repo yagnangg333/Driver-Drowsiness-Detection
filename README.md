@@ -4,12 +4,15 @@ Real-time driver drowsiness detection with **condition-aware adaptive signal fus
 
 The system tracks the driver's face from a webcam with MediaPipe. It combines three drowsiness cues (eye closure, yawning and head tilt) into one score and raises escalating alerts. The goal of the project is to re-weight those cues when conditions such as low light or glasses make some of them unreliable.
 
+> [!WARNING]
+> **This is a research prototype for a course project, not a safety device.** Its detection accuracy (missed drowsiness, false alarms, reaction time) has not been measured yet. All thresholds and weights are untuned starting values. Never rely on it while driving.
+
 ## Status
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Landmark pipeline; EAR, MAR, head pose | ✅ Done |
-| 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | ✅ Done |
+| 1 | Landmark pipeline; EAR, MAR, head pose | Implemented; not yet validated on real data |
+| 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | Implemented; not yet validated on real data |
 | 3 | Condition detection (low light, glasses) + adaptive fusion | Planned (CE‑2, Nov 1) |
 | 4 | Evaluation vs. static baseline on datasets and own clips | Planned |
 | 5 | Dashboard polish, documentation, final report | Planned (Endsem) |
@@ -21,7 +24,7 @@ flowchart LR
     A[Webcam / video] --> B[MediaPipe FaceLandmarker<br/>478 landmarks]
     B --> C[Signals<br/>EAR · MAR · head pose]
     C --> K[Per-driver calibration]
-    K --> D[Indicators<br/>PERCLOS + microsleep · yawns · head tilt]
+    K --> D[Indicators<br/>closed-eye ratio + microsleep · yawns · head tilt]
     D --> E[Fusion<br/>weighted score 0-1]
     E --> F[Alert manager<br/>Level 1 / 2 / 3]
     F --> G[Overlay · sound · CSV log · dashboard]
@@ -33,8 +36,16 @@ flowchart LR
    - **MAR** (Mouth Aspect Ratio), the inner-lip opening divided by the mouth width.
    - **Head pitch, yaw and roll**, from OpenCV `solvePnP` with a generic 3D face model.
 3. **Calibration.** For the first 5 seconds the driver looks ahead with eyes open. The median values become that driver's baseline: the closed-eye threshold is set to 75% of the open-eye EAR, and head angles are measured relative to the neutral pose. This adapts the system to each driver's eye shape, glasses and camera position.
+
+   A baseline that doesn't look like open eyes facing ahead is rejected and calibration restarts. That covers open-eye EAR below 0.20 or above 0.45, and the head pitched more than 25°. After 3 rejected attempts the default thresholds are used and a warning stays on screen.
 4. **Indicators.** These are based on time, not frame counts, so they don't depend on FPS:
-   - **Eyes:** the higher of **PERCLOS** (the share of the last 20 seconds with eyes closed) and the length of the current eye closure (a closure of 1.5 seconds or more counts as a microsleep and gives a score of 1).
+   - **Eyes:** the higher of two scores:
+     - a **PERCLOS-like closed-eye ratio**: the share of the last 20 seconds with EAR below the calibrated threshold;
+     - the length of the current eye closure. A closure of 1.5 seconds or more counts as a microsleep and gives a score of 1.
+
+     A closure only ends once the eyes stay open for 0.15 s, so one noisy frame can't reset the microsleep timer.
+
+     "Closed" here means EAR below 75% of the open-eye value. That is looser than the ≥ 80%-eyelid-closure (P80) definition used by classic PERCLOS, so the ratio is not directly comparable with PERCLOS values in the literature.
    - **Yawning:** the number of yawns in the last 60 seconds. A yawn is the mouth held wide open for at least 1.5 seconds.
    - **Head:** how long the head has been nodded forward by more than 15° or tilted sideways by more than 20°.
 5. **Fusion.** The baseline (`StaticFusion`) is a fixed-weight average: eyes 0.5, yawning 0.2, head 0.3. Phase 3 adds an adaptive strategy behind the same interface, so both can be compared on identical inputs.
@@ -43,23 +54,36 @@ flowchart LR
    | Level | Trigger | Action |
    |---|---|---|
    | 1 Warning | score ≥ 0.25, or face not visible for 3 s | on-screen warning |
-   | 2 Alarm | score ≥ 0.45 | looping alarm sound |
-   | 3 Critical | score ≥ 0.65, or Level 2 held for 5 s | full-volume alarm, held for at least 5 s |
+   | 2 Alarm | score ≥ 0.45, or a microsleep, or face not visible for 6 s | looping alarm sound |
+   | 3 Critical | score ≥ 0.65, or Level 2 held for 5 s, or face not visible for 10 s | full-volume alarm, held for at least 5 s |
 
-   A small margin (hysteresis) stops the level flickering near a threshold. Every level change is written to `logs/alerts_<timestamp>.csv`.
+   A small margin (hysteresis) stops the level flickering near a threshold. Every level change is written to `logs/alerts_<timestamp>.csv`. If that file can't be written (for example it's open in Excel), detection carries on and the missed rows are written later.
+
+   **Failing loudly.** Losing the face escalates to an audible alarm, because a slumped head or a blocked camera is exactly when the driver can't be watched. If the camera stops delivering frames, the app retries for 2 s and reopens the device once. If the camera is still gone, or monitoring stops for any other reason after it started, the alarm sounds until you acknowledge it.
+
+   **Limits of the static weights.** The fused score is a weighted average, so a single cue has a ceiling:
+   - Yawning alone (max 0.2) never raises an alert.
+   - Head tilt alone (max 0.3) only reaches Level 1, which is visual only.
+   - Eye closure alone reaches Level 2 from the microsleep rule and Level 3 only by escalation.
+
+   Recalibrating (the `c` key, or restarting detection in the dashboard) clears the alert state, so alerts are suppressed for the few seconds calibration takes.
 
 ## Setup
 
-Requires **Python 3.11 or 3.12** (MediaPipe has no builds for newer versions yet) and a webcam.
+Requires **Python 3.11 or 3.12**, the versions CI tests on, and a webcam. Newer Python versions may work, since MediaPipe 1.0 ships a version-independent wheel, but they haven't been tested.
 
 ```bash
 py -3.12 -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # Linux / macOS
-pip install -e ".[dev]"
+pip install -c constraints.txt -e ".[dev]"
 ```
 
+[`constraints.txt`](constraints.txt) pins the dependency versions the project was tested with. Leave out `-c constraints.txt` to get the latest versions instead. Install in editable mode (`-e`) from a checkout: the code finds `models/`, `assets/` and `configs/` relative to the repository.
+
 The face model (`models/face_landmarker.task`, 3.6 MB) is included in the repo. If it's missing, run `drowsiness download-model`, which downloads it and verifies its checksum.
+
+On Linux, MediaPipe and OpenCV also need system libraries: `sudo apt-get install libgl1 libglib2.0-0 libegl1 libgles2`.
 
 ## Usage
 
@@ -75,6 +99,13 @@ All commands are available as `drowsiness <command>` or `python -m drowsiness <c
 
 Common options: `--config my.toml`, `--no-calibration`, `--no-sound` and `--source 1` (a camera index or a video file).
 
+The dashboard runs one detection session at a time; a second browser tab is told to stop the first. Settings are locked while detection runs.
+
+### Privacy and network access
+
+- The dashboard streams the webcam **without any login**, so it only listens on this computer (`127.0.0.1`) by default. That's set by `drowsiness dashboard` and by [`.streamlit/config.toml`](.streamlit/config.toml). Use `drowsiness dashboard --address 0.0.0.0` only on a network you trust; anyone who can reach it can watch the camera and control detection.
+- No images or video are saved. Alert events go to `logs/`, and `--record`/`process` write per-frame signal values (EAR, MAR, head angles, scores) to CSV. These files say when a person appeared drowsy, so treat them as personal data. They're kept until you delete them, and `logs/` is excluded from git.
+
 ### Configuration
 
 Every threshold, window and weight is set in [`configs/default.toml`](configs/default.toml). To change settings, copy the file, edit only what you need, and pass it with `--config`. Unknown keys and wrong value types are rejected with a clear error.
@@ -87,7 +118,7 @@ src/drowsiness/
   landmarks.py     MediaPipe FaceLandmarker wrapper, model download
   signals.py       EAR, MAR, head pose (solvePnP)
   calibration.py   per-driver baseline
-  indicators.py    PERCLOS/microsleep, yawn, head-tilt scores
+  indicators.py    closed-eye ratio/microsleep, yawn, head-tilt scores
   fusion.py        fusion strategies (StaticFusion baseline)
   alerts.py        3-level alert state machine + CSV event log
   audio.py         alarm sound (pygame)
@@ -113,7 +144,9 @@ ruff check src tests         # lint
 ruff format src tests        # format
 ```
 
-GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push and pull request.
+GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `main` and every pull request.
+
+The tests cover the signal maths, timing logic, alerts (including face loss and microsleep), calibration rejection, config validation, camera dropouts, audio, the CLI and a dashboard smoke test. End-to-end tests run the real model on two recorded frames, and head-pose signs are checked against real face geometry. They check that the code behaves as designed. They don't measure detection accuracy; that needs labelled video (Phase 4).
 
 ## Tuning tips
 

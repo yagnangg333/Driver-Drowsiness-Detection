@@ -34,6 +34,18 @@ def test_int_accepted_for_float():
         ({"camera": {"mirror": 1}}, "must be bool"),
         ({"alerts": {"level1_threshold": 0.9}}, "thresholds"),
         ({"fusion": {"eye_weight": 0, "yawn_weight": 0, "head_weight": 0}}, "weights"),
+        # Values that used to pass validation and then crash or disable detection.
+        ({"indicators": {"perclos_window_s": 0.0}}, "perclos_window_s must be > 0"),
+        ({"indicators": {"microsleep_s": 0.0}}, "microsleep_s must be > 0"),
+        ({"indicators": {"yawns_for_max": 0}}, "yawns_for_max must be > 0"),
+        ({"indicators": {"default_ear_threshold": -1.0}}, "default_ear_threshold"),
+        ({"calibration": {"min_samples": 0}}, "min_samples must be > 0"),
+        ({"calibration": {"duration_s": 0.0}}, "duration_s must be > 0"),
+        ({"alerts": {"hysteresis": -1.0}}, "hysteresis"),
+        ({"alerts": {"no_face_alarm_s": 2.0}}, "no_face_warning_s < no_face_alarm_s"),
+        ({"landmarker": {"max_faces": 0}}, "max_faces"),
+        ({"landmarker": {"min_detection_confidence": 1.5}}, "between 0 and 1"),
+        ({"camera": {"width": 0}}, "width must be > 0"),
     ],
 )
 def test_invalid_config_rejected(data, message):

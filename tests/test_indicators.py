@@ -39,6 +39,23 @@ def test_microsleep_reaches_full_score():
     assert state.closed_duration_s == pytest.approx(1.6, abs=0.05)
 
 
+def test_single_open_frame_does_not_reset_microsleep_timer():
+    # A noisy EAR frame above the threshold in the middle of a closure.
+    ind = EyeClosureIndicator(window_s=20.0, perclos_max=0.4, microsleep_s=1.5, debounce_s=0.15)
+    _, t = _feed(ind, 0.0, 1.0, True)
+    _, t = _feed(ind, t, DT, False)  # one frame "open"
+    state, _ = _feed(ind, t, 0.6, True)
+    assert state.closed_duration_s == pytest.approx(1.63, abs=0.05)
+    assert state.microsleep and state.score == 1.0
+
+
+def test_eyes_reopened_beyond_debounce_end_the_closure():
+    ind = EyeClosureIndicator(window_s=20.0, perclos_max=0.4, microsleep_s=1.5, debounce_s=0.15)
+    _, t = _feed(ind, 0.0, 1.0, True)
+    state, _ = _feed(ind, t, 0.3, False)
+    assert state.closed_duration_s == 0.0 and not state.microsleep
+
+
 def test_perclos_over_window():
     ind = eye_indicator()
     t = 0.0

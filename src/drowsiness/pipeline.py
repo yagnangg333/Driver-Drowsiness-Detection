@@ -30,6 +30,7 @@ class FrameReport:
     signals: FaceSignals | None
     calibrating: bool
     calibration_progress: float
+    calibration_note: str | None
     baseline: Baseline | None
     eye: EyeState
     yawn: YawnState
@@ -60,6 +61,7 @@ class FrameReport:
             "yaw": pose.yaw if pose else nan,
             "roll": pose.roll if pose else nan,
             "eyes_closed": int(self.eye.closed),
+            "microsleep": int(self.eye.microsleep),
             "perclos": self.eye.perclos,
             "yawning": int(self.yawn.yawning),
             "head_tilted": int(self.head.tilted),
@@ -86,7 +88,9 @@ class DrowsinessPipeline:
         self.fusion = fusion or StaticFusion(config.fusion)
 
         ind = config.indicators
-        self._eye = EyeClosureIndicator(ind.perclos_window_s, ind.perclos_max, ind.microsleep_s)
+        self._eye = EyeClosureIndicator(
+            ind.perclos_window_s, ind.perclos_max, ind.microsleep_s, ind.closure_debounce_s
+        )
         self._yawn = YawnIndicator(
             ind.yawn_mar_threshold, ind.yawn_min_duration_s, ind.yawn_window_s, ind.yawns_for_max
         )
@@ -124,7 +128,9 @@ class DrowsinessPipeline:
         )
         event = None
         if not calibrating:
-            event = self.alerts.update(timestamp, fusion.score, face is not None)
+            event = self.alerts.update(
+                timestamp, fusion.score, face is not None, self._eye.state.microsleep
+            )
 
         return FrameReport(
             timestamp=timestamp,
@@ -132,6 +138,7 @@ class DrowsinessPipeline:
             signals=signals,
             calibrating=calibrating,
             calibration_progress=self._calibrator.progress,
+            calibration_note=self._calibrator.note,
             baseline=self._calibrator.result,
             eye=self._eye.state,
             yawn=self._yawn.state,

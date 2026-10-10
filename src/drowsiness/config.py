@@ -25,12 +25,31 @@ def resolve_path(path: str | Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ConfigError(message)
+
+
+def _require_positive(section: str, obj: object, *names: str) -> None:
+    for name in names:
+        _require(getattr(obj, name) > 0, f"{section}.{name} must be > 0")
+
+
+def _require_fraction(section: str, obj: object, *names: str) -> None:
+    for name in names:
+        _require(0 <= getattr(obj, name) <= 1, f"{section}.{name} must be between 0 and 1")
+
+
 @dataclass(frozen=True)
 class CameraConfig:
     index: int = 0
     width: int = 640
     height: int = 480
     mirror: bool = True
+
+    def __post_init__(self) -> None:
+        _require(self.index >= 0, "camera.index must be >= 0")
+        _require_positive("camera", self, "width", "height")
 
 
 @dataclass(frozen=True)
@@ -40,6 +59,16 @@ class LandmarkerConfig:
     min_detection_confidence: float = 0.5
     min_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
+
+    def __post_init__(self) -> None:
+        _require(self.max_faces >= 1, "landmarker.max_faces must be >= 1")
+        _require_fraction(
+            "landmarker",
+            self,
+            "min_detection_confidence",
+            "min_presence_confidence",
+            "min_tracking_confidence",
+        )
 
 
 @dataclass(frozen=True)
@@ -51,12 +80,27 @@ class CalibrationConfig:
     ear_closed_ratio: float = 0.75
     min_ear_threshold: float = 0.12
     max_ear_threshold: float = 0.30
+    # Plausibility checks: a baseline outside these limits (eyes already closed,
+    # looking far down) is rejected and calibration restarts.
+    min_open_ear: float = 0.20
+    max_open_ear: float = 0.45
+    max_neutral_pitch_deg: float = 25.0
+    max_attempts: int = 3
 
     def __post_init__(self) -> None:
-        if not 0 < self.ear_closed_ratio < 1:
-            raise ConfigError("calibration.ear_closed_ratio must be between 0 and 1")
-        if self.min_ear_threshold > self.max_ear_threshold:
-            raise ConfigError("calibration.min_ear_threshold must be <= max_ear_threshold")
+        _require_positive("calibration", self, "duration_s", "min_samples", "max_attempts")
+        _require(
+            0 < self.ear_closed_ratio < 1, "calibration.ear_closed_ratio must be between 0 and 1"
+        )
+        _require(
+            0 < self.min_ear_threshold <= self.max_ear_threshold,
+            "calibration: need 0 < min_ear_threshold <= max_ear_threshold",
+        )
+        _require(
+            0 < self.min_open_ear < self.max_open_ear,
+            "calibration: need 0 < min_open_ear < max_open_ear",
+        )
+        _require_positive("calibration", self, "max_neutral_pitch_deg")
 
 
 @dataclass(frozen=True)
@@ -66,6 +110,9 @@ class IndicatorConfig:
     perclos_window_s: float = 20.0
     perclos_max: float = 0.4
     microsleep_s: float = 1.5
+    # A closure only ends once the eyes stay open this long, so a single
+    # noisy frame does not reset the microsleep timer.
+    closure_debounce_s: float = 0.15
     # Yawning
     yawn_mar_threshold: float = 0.5
     yawn_min_duration_s: float = 1.5
@@ -75,6 +122,24 @@ class IndicatorConfig:
     head_pitch_threshold_deg: float = 15.0
     head_roll_threshold_deg: float = 20.0
     head_tilt_max_s: float = 2.0
+
+    def __post_init__(self) -> None:
+        _require_positive(
+            "indicators",
+            self,
+            "default_ear_threshold",
+            "perclos_window_s",
+            "perclos_max",
+            "microsleep_s",
+            "yawn_mar_threshold",
+            "yawn_min_duration_s",
+            "yawn_window_s",
+            "yawns_for_max",
+            "head_pitch_threshold_deg",
+            "head_roll_threshold_deg",
+            "head_tilt_max_s",
+        )
+        _require(self.closure_debounce_s >= 0, "indicators.closure_debounce_s must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -97,7 +162,14 @@ class AlertConfig:
     hysteresis: float = 0.05
     escalate_after_s: float = 5.0
     level3_hold_s: float = 5.0
+    # A microsleep (eyes closed for indicators.microsleep_s) always raises at
+    # least an alarm, whatever the fusion weights.
+    microsleep_alarm: bool = True
+    # Losing the driver's face escalates too: the head may have slumped out of
+    # view or the camera may be blocked.
     no_face_warning_s: float = 3.0
+    no_face_alarm_s: float = 6.0
+    no_face_critical_s: float = 10.0
     sound_enabled: bool = True
     sound_path: str = "assets/alarm.wav"
     log_dir: str = "logs"
@@ -105,6 +177,13 @@ class AlertConfig:
     def __post_init__(self) -> None:
         if not 0 < self.level1_threshold < self.level2_threshold < self.level3_threshold <= 1:
             raise ConfigError("alert thresholds must satisfy 0 < level1 < level2 < level3 <= 1")
+        _require(self.hysteresis >= 0, "alerts.hysteresis must be >= 0")
+        _require_positive("alerts", self, "escalate_after_s", "no_face_warning_s")
+        _require(self.level3_hold_s >= 0, "alerts.level3_hold_s must be >= 0")
+        _require(
+            self.no_face_warning_s < self.no_face_alarm_s < self.no_face_critical_s,
+            "alerts: need no_face_warning_s < no_face_alarm_s < no_face_critical_s",
+        )
 
     @property
     def thresholds(self) -> tuple[float, float, float]:
