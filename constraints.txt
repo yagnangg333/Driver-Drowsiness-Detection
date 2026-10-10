@@ -1,5 +1,6 @@
-# Versions the project was last tested with. Install reproducibly with:
+# Versions the project was last tested with, on Python 3.12. Install reproducibly with:
 #   pip install -c constraints.txt -e ".[dev]"
+# Some pins (e.g. numpy 2.5) need Python 3.12+; on Python 3.11 install without -c.
 # Regenerate after upgrading dependencies and re-running the tests.
 absl-py==2.5.0
 altair==6.3.0

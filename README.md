@@ -79,7 +79,7 @@ py -3.12 -m venv .venv
 pip install -c constraints.txt -e ".[dev]"
 ```
 
-[`constraints.txt`](constraints.txt) pins the dependency versions the project was tested with. Leave out `-c constraints.txt` to get the latest versions instead. Install in editable mode (`-e`) from a checkout: the code finds `models/`, `assets/` and `configs/` relative to the repository.
+[`constraints.txt`](constraints.txt) pins the dependency versions the project was tested with on Python 3.12. Some of them (for example numpy 2.5) need Python 3.12 or newer, so on Python 3.11 leave out `-c constraints.txt`; pip then picks the newest versions that support 3.11. Install in editable mode (`-e`) from a checkout: the code finds `models/`, `assets/` and `configs/` relative to the repository.
 
 The face model (`models/face_landmarker.task`, 3.6 MB) is included in the repo. If it's missing, run `drowsiness download-model`, which downloads it and verifies its checksum.
 
