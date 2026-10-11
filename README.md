@@ -35,7 +35,7 @@ flowchart LR
    - **EAR** (Eye Aspect Ratio), from six landmarks around each eye.
    - **MAR** (Mouth Aspect Ratio), the inner-lip opening divided by the mouth width.
    - **Head pitch, yaw and roll**, from OpenCV `solvePnP` with a generic 3D face model.
-3. **Calibration.** For the first 5 seconds the driver looks ahead with eyes open. The median values become that driver's baseline: the closed-eye threshold is set to 75% of the open-eye EAR, and head angles are measured relative to the neutral pose. This adapts the system to each driver's eye shape, glasses and camera position.
+3. **Calibration.** For the first 5 seconds the driver looks ahead with eyes open. The median values become that driver's baseline: the closed-eye threshold is set to 60% of the open-eye EAR, and head angles are measured relative to the neutral pose. This adapts the system to each driver's eye shape, glasses and camera position.
 
    A baseline that doesn't look like open eyes facing ahead is rejected and calibration restarts. That covers open-eye EAR below 0.20 or above 0.45, and the head pitched more than 25°. After 3 rejected attempts the default thresholds are used and a warning stays on screen.
 4. **Indicators.** These are based on time, not frame counts, so they don't depend on FPS:
@@ -45,7 +45,7 @@ flowchart LR
 
      A closure only ends once the eyes stay open for 0.15 s, so one noisy frame can't reset the microsleep timer.
 
-     "Closed" here means EAR below 75% of the open-eye value. That is looser than the ≥ 80%-eyelid-closure (P80) definition used by classic PERCLOS, so the ratio is not directly comparable with PERCLOS values in the literature.
+     "Closed" here means EAR below 60% of the open-eye value (75% was tried first, but it also counted smiles, squints and looking down). That is looser than the ≥ 80%-eyelid-closure (P80) definition used by classic PERCLOS, so the ratio is not directly comparable with PERCLOS values in the literature.
    - **Yawning:** the number of yawns in the last 60 seconds. A yawn is the mouth held wide open for at least 1.5 seconds.
    - **Head:** how long the head has been nodded forward by more than 15° or tilted sideways by more than 20°.
 5. **Fusion.** The baseline (`StaticFusion`) is a fixed-weight average: eyes 0.5, yawning 0.2, head 0.3. Phase 3 adds an adaptive strategy behind the same interface, so both can be compared on identical inputs.
@@ -57,7 +57,7 @@ flowchart LR
    | 2 Alarm | score ≥ 0.45, or a microsleep, or face not visible for 6 s | looping alarm sound |
    | 3 Critical | score ≥ 0.65, or Level 2 held for 5 s, or face not visible for 10 s | full-volume alarm, held for at least 5 s |
 
-   A small margin (hysteresis) stops the level flickering near a threshold. Every level change is written to `logs/alerts_<timestamp>.csv`. If that file can't be written (for example it's open in Excel), detection carries on and the missed rows are written later.
+   A small margin (hysteresis) stops the level flickering near a threshold, and an alarm, once raised, sounds for at least 1.5 s so it never stutters. While the face is missing the level never goes down. Yawns and head tilts are debounced like eye closures (0.2 s), and a face dropout shorter than 0.3 s keeps every timer running; a longer one clears them, so time that was not observed is never counted as eyes closed. Every level change is written to `logs/alerts_<timestamp>.csv`. If that file can't be written (for example it's open in Excel), detection carries on and the missed rows are written later.
 
    **Failing loudly.** Losing the face escalates to an audible alarm, because a slumped head or a blocked camera is exactly when the driver can't be watched. If the camera stops delivering frames, the app retries for 2 s and reopens the device once. If the camera is still gone, or monitoring stops for any other reason after it started, the alarm sounds until you acknowledge it.
 
@@ -149,7 +149,7 @@ The tests cover the signal maths, timing logic, alerts (including face loss and 
 
 ## Tuning tips
 
-- With glasses or narrow eyes, calibration normally handles the threshold. If false alarms continue, lower `ear_closed_ratio` (for example to 0.7).
+- With glasses or narrow eyes, calibration normally handles the threshold. If false alarms continue, lower `ear_closed_ratio` (for example to 0.55); raise it towards 0.7 to catch partly drooping eyes earlier, at the cost of more false alarms.
 - Mount the camera roughly at eye level, facing the driver. Head-pose angles are measured relative to the calibrated pose, so small offsets are fine.
 - Press `c` (CLI) or restart detection (dashboard) to recalibrate after changing seats or lighting.
 
