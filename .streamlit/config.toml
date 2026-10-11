@@ -1,0 +1,8 @@
+# The dashboard streams the webcam without authentication, so serve it on this
+# computer only. `drowsiness dashboard --address 0.0.0.0` overrides this if you
+# really need to open it from another device on a trusted network.
+[server]
+address = "127.0.0.1"
+
+[browser]
+gatherUsageStats = false

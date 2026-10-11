@@ -23,9 +23,11 @@ RIGHT_EYE = (362, 385, 387, 263, 373, 380)
 MOUTH_CORNERS = (78, 308)
 MOUTH_VERTICAL_PAIRS = ((81, 178), (13, 14), (311, 402))
 
-# Landmarks used for head pose and their positions on a generic 3D face (mm),
-# in a camera-aligned frame: x to image-right, y down, z away from the camera.
-# A face looking straight into the camera therefore has zero rotation.
+# Landmarks used for head pose and their positions on a generic 3D face, in a
+# camera-aligned frame: x to image-right, y down, z away from the camera. A face
+# looking straight into the camera therefore has zero rotation. The units are
+# arbitrary (about 4.5x a real face in mm); scale only affects the translation,
+# which is unused, not the rotation.
 POSE_LANDMARKS = (1, 152, 33, 263, 61, 291)
 FACE_MODEL_3D = np.array(
     [
@@ -38,7 +40,7 @@ FACE_MODEL_3D = np.array(
     ],
     dtype=np.float64,
 )
-_EYE_SPAN_MM = 450.0
+_MODEL_EYE_SPAN = 450.0  # distance between the two eye corners in FACE_MODEL_3D
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ def estimate_head_pose(points: np.ndarray, image_size: tuple[int, int]) -> HeadP
     if eye_span_px < 1e-6:
         return None
     rvec = np.zeros((3, 1))
-    tvec = np.array([[0.0], [0.0], [focal * _EYE_SPAN_MM / eye_span_px]])
+    tvec = np.array([[0.0], [0.0], [focal * _MODEL_EYE_SPAN / eye_span_px]])
     ok, rvec, _ = cv2.solvePnP(
         FACE_MODEL_3D,
         image_points,

@@ -3,14 +3,19 @@
 
 import csv
 import dataclasses
+import math
 
 import cv2
+import numpy as np
 import pytest
 
+from drowsiness import overlay
 from drowsiness.alerts import AlertLevel
 from drowsiness.cli import main
 from drowsiness.config import AppConfig, CalibrationConfig
+from drowsiness.landmarks import FaceLandmarker
 from drowsiness.pipeline import DrowsinessPipeline
+from drowsiness.signals import estimate_head_pose
 
 from .conftest import requires_model
 
@@ -76,3 +81,64 @@ def test_process_command_writes_signals(tmp_path, awake_frame, drowsy_frame):
     assert rows[0]["eyes_closed"] == "0"
     assert rows[-1]["eyes_closed"] == "1"
     assert int(rows[-1]["alert_level"]) >= AlertLevel.ALARM
+
+
+def test_face_loss_after_calibration_escalates_to_critical(config, awake_frame):
+    blank = np.zeros_like(awake_frame)  # head out of view / camera covered
+    with DrowsinessPipeline(config) as pipeline:
+        report, t = _feed(pipeline, awake_frame, 2.5, 0.0)
+        report, t = _feed(pipeline, blank, 6.5, t)
+        assert not report.face_detected and report.alert_level == AlertLevel.ALARM
+        report, _ = _feed(pipeline, blank, 4.0, t)
+        assert report.alert_level == AlertLevel.CRITICAL
+
+
+def test_calibration_with_closed_eyes_is_rejected(config, drowsy_frame, awake_frame):
+    with DrowsinessPipeline(config) as pipeline:
+        report, t = _feed(pipeline, drowsy_frame, 2.5, 0.0)
+        assert report.calibrating and "eyes look closed" in report.calibration_note
+        report, _ = _feed(pipeline, awake_frame, 2.5, t)
+        assert not report.calibrating and report.baseline.calibrated
+        assert report.baseline.ear > 0.28
+
+
+def test_overlay_draws_every_state(config, awake_frame, drowsy_frame):
+    with DrowsinessPipeline(config) as pipeline:
+        states = [pipeline.process(awake_frame, 0.0)]  # calibrating
+        _, t = _feed(pipeline, awake_frame, 2.5, 0.0)
+        states.append(pipeline.process(awake_frame, t))  # awake
+        report, t = _feed(pipeline, drowsy_frame, 2.0, t)
+        states.append(report)  # alarm
+        states.append(pipeline.process(np.zeros_like(awake_frame), t))  # no face
+    for report in states:
+        frame = awake_frame.copy()
+        out = overlay.draw(frame, report, fps=25.0)
+        assert out.shape == awake_frame.shape
+        assert not np.array_equal(out, awake_frame)
+
+
+def _rotation(pitch, yaw):
+    p, y = math.radians(pitch), math.radians(yaw)
+    rx = np.array([[1, 0, 0], [0, math.cos(p), -math.sin(p)], [0, math.sin(p), math.cos(p)]])
+    ry = np.array([[math.cos(y), 0, math.sin(y)], [0, 1, 0], [-math.sin(y), 0, math.cos(y)]])
+    return ry @ rx
+
+
+@pytest.mark.parametrize("pitch, yaw", [(20, 0), (-20, 0), (0, 45), (0, -45)])
+def test_head_pose_on_real_face_geometry(awake_frame, pitch, yaw):
+    """Rotate the driver's real 3D landmarks (not the generic model used by the
+    solver) and check the estimate: nodding down must read as positive pitch,
+    and turning to check a mirror must not look like a nod."""
+    with FaceLandmarker() as landmarker:
+        face = landmarker.detect(awake_frame, 0.0)
+    points = face.landmarks
+    centre = points.mean(axis=0)
+    base = estimate_head_pose(points, face.image_size)
+    rotated = (points - centre) @ _rotation(pitch, yaw).T + centre
+    pose = estimate_head_pose(rotated, face.image_size)
+    d_pitch = pose.pitch - base.pitch
+    if pitch:
+        assert math.copysign(1, d_pitch) == math.copysign(1, pitch)
+        assert abs(d_pitch) == pytest.approx(abs(pitch), rel=0.4)
+    else:
+        assert abs(d_pitch) < 8.0  # well below the 15 deg nod threshold

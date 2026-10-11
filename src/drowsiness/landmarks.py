@@ -121,8 +121,12 @@ def download_model(destination: str | Path | None = None, force: bool = False) -
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
     log.info("Downloading %s", MODEL_URL)
-    with urllib.request.urlopen(MODEL_URL, timeout=60) as response, partial.open("wb") as out:
-        out.write(response.read())
+    try:
+        with urllib.request.urlopen(MODEL_URL, timeout=60) as response, partial.open("wb") as out:
+            out.write(response.read())
+    except OSError as exc:  # URLError, timeouts, disk errors
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(f"Could not download the face model: {exc}") from exc
 
     digest = hashlib.sha256(partial.read_bytes()).hexdigest()
     if digest != MODEL_SHA256:

@@ -66,6 +66,33 @@ def test_missing_face_raises_warning(manager):
     assert "not visible" in events[0].reason
 
 
+def test_missing_face_escalates_to_audible_alarms(manager):
+    # Head slumped out of view / camera blocked: must not stay at a silent warning.
+    events, t = run(manager, [0.0] * 105, face=False)  # 10.5 s without a face
+    assert [(e.level, round(e.timestamp)) for e in events] == [
+        (AlertLevel.WARNING, 3),
+        (AlertLevel.ALARM, 6),
+        (AlertLevel.CRITICAL, 10),
+    ]
+    # Face back and awake: critical is held briefly, then clears.
+    run(manager, [0.0] * 40, start=t)
+    assert manager.level == AlertLevel.CRITICAL
+    run(manager, [0.0] * 20, start=t + 4.0)
+    assert manager.level == AlertLevel.NONE
+
+
+def test_microsleep_forces_alarm_regardless_of_weights(manager):
+    # Eyes-only score 0.1 would be "normal", but a microsleep is always an alarm.
+    event = manager.update(0.0, 0.1, face_detected=True, microsleep=True)
+    assert event.level == AlertLevel.ALARM and "microsleep" in event.reason
+
+
+def test_microsleep_floor_can_be_disabled():
+    manager = AlertManager(AlertConfig(microsleep_alarm=False))
+    assert manager.update(0.0, 0.1, face_detected=True, microsleep=True) is None
+    assert manager.level == AlertLevel.NONE
+
+
 def test_event_log_writes_csv(tmp_path, manager):
     log = EventLog(tmp_path)
     for event in run(manager, [0.3, 0.5, 0.0, 0.0])[0]:
@@ -73,3 +100,19 @@ def test_event_log_writes_csv(tmp_path, manager):
     lines = log.path.read_text(encoding="utf-8").splitlines()
     assert lines[0].startswith("wall_time,session_time_s")
     assert len(lines) == 1 + len(log.events) == 4
+
+
+def test_event_log_survives_unwritable_file_and_retries(tmp_path, manager):
+    # Simulates the CSV being locked (e.g. open in Excel): writing raises OSError.
+    log = EventLog(tmp_path)
+    log.path.mkdir()  # a directory where the file should be -> open() fails
+    events, _ = run(manager, [0.3, 0.5])
+    for event in events:
+        log.record(event)  # must not raise
+    assert log.write_failed and len(log.events) == 2
+
+    log.path.rmdir()  # lock released
+    log.record(run(manager, [0.0], start=5.0)[0][0])
+    lines = log.path.read_text(encoding="utf-8").splitlines()
+    assert not log.write_failed
+    assert len(lines) == 1 + 3  # the two missed events were written too

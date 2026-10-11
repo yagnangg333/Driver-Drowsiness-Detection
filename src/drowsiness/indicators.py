@@ -25,15 +25,24 @@ class EyeState:
     closed: bool = False
     perclos: float = 0.0
     closed_duration_s: float = 0.0
+    microsleep: bool = False
 
 
 class EyeClosureIndicator:
-    """Combines PERCLOS (fatigue) with continuous-closure time (microsleep)."""
+    """Combines a PERCLOS-like closed-eye ratio (fatigue) with continuous-closure
+    time (microsleep).
 
-    def __init__(self, window_s: float, perclos_max: float, microsleep_s: float):
+    "Closed" means EAR below the calibrated threshold (by default 75% of the
+    open-eye EAR), which is looser than the P80 criterion of classic PERCLOS.
+    """
+
+    def __init__(
+        self, window_s: float, perclos_max: float, microsleep_s: float, debounce_s: float = 0.0
+    ):
         self._window_s = window_s
         self._perclos_max = perclos_max
         self._microsleep_s = microsleep_s
+        self._debounce_s = debounce_s
         self.reset()
 
     def reset(self) -> None:
@@ -42,6 +51,7 @@ class EyeClosureIndicator:
         self._closed_samples = 0
         self._last_t: float | None = None
         self._closed_since: float | None = None
+        self._open_since: float | None = None
         self.state = EyeState()
 
     def update(self, t: float, closed: bool) -> EyeState:
@@ -59,10 +69,16 @@ class EyeClosureIndicator:
         if self._closed_samples == 0:
             self._closed_time = 0.0  # drop accumulated floating-point drift
 
-        if closed and self._closed_since is None:
-            self._closed_since = t
-        elif not closed:
-            self._closed_since = None
+        if closed:
+            self._open_since = None
+            if self._closed_since is None:
+                self._closed_since = t
+        elif self._closed_since is not None:
+            # Only end the closure once the eyes have stayed open long enough.
+            if self._open_since is None:
+                self._open_since = t
+            if t - self._open_since >= self._debounce_s:
+                self._closed_since = self._open_since = None
         closed_duration = 0.0 if self._closed_since is None else t - self._closed_since
 
         # Dividing by the full window (not the elapsed time) keeps PERCLOS
@@ -71,7 +87,8 @@ class EyeClosureIndicator:
         score = max(
             _clip01(perclos / self._perclos_max), _clip01(closed_duration / self._microsleep_s)
         )
-        self.state = EyeState(score, closed, perclos, closed_duration)
+        microsleep = closed_duration >= self._microsleep_s
+        self.state = EyeState(score, closed, perclos, closed_duration, microsleep)
         return self.state
 
 

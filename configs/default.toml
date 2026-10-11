@@ -23,12 +23,19 @@ min_samples = 30
 ear_closed_ratio = 0.75             # closed = EAR below 75% of the open-eye EAR
 min_ear_threshold = 0.12
 max_ear_threshold = 0.30
+# A baseline outside these limits is rejected and calibration restarts;
+# after max_attempts the default thresholds are used, with a visible warning.
+min_open_ear = 0.20                 # lower = eyes were probably closed/drowsy
+max_open_ear = 0.45
+max_neutral_pitch_deg = 25.0        # larger = driver was looking down/up
+max_attempts = 3
 
 [indicators]
 default_ear_threshold = 0.21        # used when calibration is off or fails
 perclos_window_s = 20.0
 perclos_max = 0.4                   # PERCLOS mapped to an eye score of 1
 microsleep_s = 1.5                  # continuous closure mapped to an eye score of 1
+closure_debounce_s = 0.15           # eyes must stay open this long to end a closure
 yawn_mar_threshold = 0.5
 yawn_min_duration_s = 1.5
 yawn_window_s = 60.0
@@ -49,7 +56,10 @@ level3_threshold = 0.65             # critical, persistent
 hysteresis = 0.05
 escalate_after_s = 5.0              # alarm held this long escalates to critical
 level3_hold_s = 5.0
-no_face_warning_s = 3.0
+microsleep_alarm = true             # a microsleep always raises at least level 2
+no_face_warning_s = 3.0             # face lost: head slumped out of view, camera blocked...
+no_face_alarm_s = 6.0
+no_face_critical_s = 10.0
 sound_enabled = true
 sound_path = "assets/alarm.wav"
 log_dir = "logs"

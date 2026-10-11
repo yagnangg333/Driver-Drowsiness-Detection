@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         return args.handler(args)
-    except (ConfigError, FileNotFoundError, RuntimeError) as exc:
+    except (ConfigError, OSError, RuntimeError) as exc:
         log.error("%s", exc)
         return 1
     except KeyboardInterrupt:
@@ -62,6 +62,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     dashboard = sub.add_parser("dashboard", help="open the Streamlit dashboard")
     dashboard.add_argument("--config", type=Path, help="TOML file overriding the defaults")
+    dashboard.add_argument(
+        "--address",
+        default="127.0.0.1",
+        help="interface to serve on (default: this computer only). The dashboard streams "
+        "the webcam without authentication, so only expose it on a network you trust.",
+    )
+    dashboard.add_argument("--port", type=int, default=8501)
     dashboard.set_defaults(handler=_cmd_dashboard)
 
     download = sub.add_parser("download-model", help="fetch the MediaPipe face model")
@@ -99,6 +106,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     recorder = SignalRecorder(args.record) if args.record else None
     window = "Driver Drowsiness Detection  (q: quit, c: recalibrate)"
     fps = None
+    started = False
 
     log.info("Starting; keep your eyes open and look ahead while calibrating")
     try:
@@ -106,6 +114,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             VideoSource(source, cam.width, cam.height, cam.mirror) as video,
             DrowsinessPipeline(config) as pipeline,
         ):
+            started = True
             last_t = None
             for frame, t in video:
                 report = pipeline.process(frame, t)
@@ -126,6 +135,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 if key == _RECALIBRATE_KEY:
                     log.info("Recalibrating")
                     pipeline.recalibrate()
+    except Exception as exc:
+        if not started:
+            raise  # failed before monitoring began: a normal error is enough
+        # Monitoring stopped while the driver relies on it: fail loudly.
+        log.error("Monitoring stopped: %s", exc)
+        _fail_loud(alarm, window, f"MONITORING STOPPED: {exc}")
+        return 1
     finally:
         alarm.stop()
         if recorder:
@@ -135,6 +151,30 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if events.path and events.events:
         log.info("Alert log: %s", events.path)
     return 0
+
+
+def _fail_loud(alarm, window: str, message: str) -> None:
+    """Sound the alarm and show ``message`` until the user presses q or Esc."""
+    import cv2
+    import numpy as np
+
+    from drowsiness.alerts import AlertLevel
+
+    alarm.set_level(AlertLevel.CRITICAL)
+    screen = np.zeros((200, 640, 3), np.uint8)
+    screen[:] = (40, 40, 200)
+    lines = [message[i : i + 52] for i in range(0, len(message), 52)][:3]
+    for i, line in enumerate([*lines, "Press q to acknowledge"]):
+        cv2.putText(
+            screen, line, (16, 50 + 40 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2
+        )
+    cv2.namedWindow(window)
+    while True:
+        cv2.imshow(window, screen)
+        if (cv2.waitKey(100) & 0xFF) in _QUIT_KEYS:
+            return
+        if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+            return
 
 
 def _cmd_process(args: argparse.Namespace) -> int:
@@ -177,7 +217,23 @@ def _cmd_process(args: argparse.Namespace) -> int:
 
 def _cmd_dashboard(args: argparse.Namespace) -> int:
     app = Path(__file__).with_name("dashboard.py")
-    command = [sys.executable, "-m", "streamlit", "run", str(app)]
+    command = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(app),
+        "--server.address",
+        args.address,
+        "--server.port",
+        str(args.port),
+    ]
+    if args.address not in ("127.0.0.1", "localhost", "::1"):
+        log.warning(
+            "Serving the dashboard on %s: anyone who can reach this address can watch "
+            "the webcam and control detection.",
+            args.address,
+        )
     if args.config:
         command += ["--", "--config", str(args.config.resolve())]
     return subprocess.call(command)
