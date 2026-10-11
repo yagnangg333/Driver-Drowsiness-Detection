@@ -31,3 +31,6 @@ Thumbs.db
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Course documents (reports, slides) stay local
+Docs/
