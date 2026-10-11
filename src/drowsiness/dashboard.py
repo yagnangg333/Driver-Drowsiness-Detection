@@ -30,7 +30,7 @@ HISTORY_S = 60.0
 PANEL_REFRESH_S = 0.3
 CHART_REFRESH_S = 1.0
 DISCLAIMER = (
-    "Research prototype for a course project, not a safety device. Accuracy has not been "
+    "Prototype built for a course project, not a safety device. Accuracy has not been "
     "validated; never rely on it while driving."
 )
 

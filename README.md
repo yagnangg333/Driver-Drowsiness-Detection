@@ -5,7 +5,7 @@ Real-time driver drowsiness detection with **condition-aware adaptive signal fus
 The system tracks the driver's face from a webcam with MediaPipe. It combines three drowsiness cues (eye closure, yawning and head tilt) into one score and raises escalating alerts. The goal of the project is to re-weight those cues when conditions such as low light or glasses make some of them unreliable.
 
 > [!WARNING]
-> **This is a research prototype for a course project, not a safety device.** Its detection accuracy (missed drowsiness, false alarms, reaction time) has not been measured yet. All thresholds and weights are untuned starting values. Never rely on it while driving.
+> **This is a prototype built for a course project, not a safety device.** Its detection accuracy (missed drowsiness, false alarms, reaction time) has not been measured yet. All thresholds and weights are untuned starting values. Never rely on it while driving.
 
 ## Status
 
@@ -132,7 +132,6 @@ tests/             unit tests + end-to-end tests on real frames
 configs/           default configuration
 models/            MediaPipe face landmarker model
 assets/            alarm sound, reference images
-legacy/            original dlib/EAR-only version (prior work)
 Docs/              reports and presentations
 ```
 
