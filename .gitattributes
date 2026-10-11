@@ -1,2 +1,13 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Binary assets
+*.dat binary
+*.task binary
+*.wav binary
+*.png binary
+*.jpg binary
+*.avi binary
+*.mp4 binary
+*.pdf binary
+*.pptx binary
