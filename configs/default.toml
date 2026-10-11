@@ -20,7 +20,8 @@ min_tracking_confidence = 0.5
 enabled = true
 duration_s = 5.0                    # look ahead with eyes open for this long
 min_samples = 30
-ear_closed_ratio = 0.75             # closed = EAR below 75% of the open-eye EAR
+ear_closed_ratio = 0.60             # closed = EAR below 60% of the open-eye EAR
+                                    # (0.75 also flagged smiles, squints, looking down)
 min_ear_threshold = 0.12
 max_ear_threshold = 0.30
 # A baseline outside these limits is rejected and calibration restarts;
@@ -40,9 +41,13 @@ yawn_mar_threshold = 0.5
 yawn_min_duration_s = 1.5
 yawn_window_s = 60.0
 yawns_for_max = 3                   # yawns within the window for a yawn score of 1
+yawn_debounce_s = 0.20              # mouth must close this long to end a yawn
 head_pitch_threshold_deg = 15.0     # forward nod, relative to the calibrated pose
 head_roll_threshold_deg = 20.0      # sideways tilt, relative to the calibrated pose
 head_tilt_max_s = 2.0               # tilt duration mapped to a head score of 1
+head_debounce_s = 0.20              # head must stay upright this long to end a tilt
+face_loss_grace_s = 0.30            # shorter face dropouts keep indicator state;
+                                    # longer ones clear closure/yawn/tilt timers
 
 [fusion]
 eye_weight = 0.5
@@ -55,6 +60,7 @@ level2_threshold = 0.45             # audio alarm
 level3_threshold = 0.65             # critical, persistent
 hysteresis = 0.05
 escalate_after_s = 5.0              # alarm held this long escalates to critical
+level2_hold_s = 1.5                 # an alarm sounds at least this long (no stutter)
 level3_hold_s = 5.0
 microsleep_alarm = true             # a microsleep always raises at least level 2
 no_face_warning_s = 3.0             # face lost: head slumped out of view, camera blocked...

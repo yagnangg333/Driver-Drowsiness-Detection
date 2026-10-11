@@ -81,6 +81,39 @@ def test_missing_face_escalates_to_audible_alarms(manager):
     assert manager.level == AlertLevel.NONE
 
 
+def test_alarm_is_held_and_does_not_stutter(manager):
+    # Score flickers around the alarm threshold: the sound must stay on, not
+    # switch on and off every frame.
+    events, t = run(manager, [0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.0])
+    assert [e.level for e in events] == [AlertLevel.ALARM]
+    run(manager, [0.0] * 14, start=t)  # last alarm at 0.4 s, so the hold ends at 1.9 s
+    assert manager.level == AlertLevel.NONE
+
+
+def test_alarm_hold_ends_after_cause_clears(manager):
+    _, t = run(manager, [0.5])
+    run(manager, [0.0] * 14, start=t)  # 1.4 s < 1.5 s hold
+    assert manager.level == AlertLevel.ALARM
+    run(manager, [0.0] * 3, start=t + 1.4)
+    assert manager.level == AlertLevel.NONE
+
+
+def test_level_never_drops_while_face_is_missing(manager):
+    # Eyes closing (alarm), then the head drops out of view: the scores the
+    # pipeline reports may fall, but the alert must not.
+    _, t = run(manager, [0.5] * 5)
+    events, _ = run(manager, [0.0] * 30, start=t, face=False)  # 3 s, past the 1.5 s hold
+    assert manager.level >= AlertLevel.ALARM
+    assert all(e.level >= AlertLevel.ALARM for e in events)
+
+
+def test_single_missing_frame_does_not_change_level(manager):
+    _, t = run(manager, [0.5] * 5)
+    events, t = run(manager, [0.0], start=t, face=False)
+    events += run(manager, [0.5] * 5, start=t)[0]
+    assert events == [] and manager.level == AlertLevel.ALARM
+
+
 def test_microsleep_forces_alarm_regardless_of_weights(manager):
     # Eyes-only score 0.1 would be "normal", but a microsleep is always an alarm.
     event = manager.update(0.0, 0.1, face_detected=True, microsleep=True)
@@ -95,7 +128,8 @@ def test_microsleep_floor_can_be_disabled():
 
 def test_event_log_writes_csv(tmp_path, manager):
     log = EventLog(tmp_path)
-    for event in run(manager, [0.3, 0.5, 0.0, 0.0])[0]:
+    # Warning, alarm, then back to normal once the 1.5 s alarm hold has passed.
+    for event in run(manager, [0.3, 0.5] + [0.0] * 20)[0]:
         log.record(event)
     lines = log.path.read_text(encoding="utf-8").splitlines()
     assert lines[0].startswith("wall_time,session_time_s")

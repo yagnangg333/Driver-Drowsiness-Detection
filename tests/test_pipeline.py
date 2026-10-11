@@ -142,3 +142,30 @@ def test_head_pose_on_real_face_geometry(awake_frame, pitch, yaw):
         assert abs(d_pitch) == pytest.approx(abs(pitch), rel=0.4)
     else:
         assert abs(d_pitch) < 8.0  # well below the 15 deg nod threshold
+
+
+def test_no_phantom_microsleep_after_face_loss(config, awake_frame, drowsy_frame):
+    """Eyes closing, face away for 2 s, back with eyes closed: the 2 s that
+    were not observed must not be counted as a closure."""
+    blank = np.zeros_like(awake_frame)
+    with DrowsinessPipeline(config) as pipeline:
+        _, t = _feed(pipeline, awake_frame, 2.5, 0.0)
+        _, t = _feed(pipeline, drowsy_frame, 1.0, t)
+        _, t = _feed(pipeline, blank, 2.0, t)
+        report, _ = _feed(pipeline, drowsy_frame, 0.3, t)
+    assert report.face_detected and report.eye.closed
+    assert not report.eye.microsleep
+    assert report.eye.closed_duration_s < 0.5
+    assert report.alert_level < AlertLevel.ALARM
+
+
+def test_single_dropped_frame_does_not_reset_microsleep(config, awake_frame, drowsy_frame):
+    blank = np.zeros_like(awake_frame)
+    with DrowsinessPipeline(config) as pipeline:
+        _, t = _feed(pipeline, awake_frame, 2.5, 0.0)
+        _, t = _feed(pipeline, drowsy_frame, 1.0, t)
+        dropped = pipeline.process(blank, t)  # one lost frame (< 0.3 s grace)
+        report, _ = _feed(pipeline, drowsy_frame, 0.7, t + 1 / FPS)
+    assert not dropped.face_detected
+    assert report.eye.microsleep and report.eye.closed_duration_s > 1.5
+    assert report.alert_level >= AlertLevel.ALARM

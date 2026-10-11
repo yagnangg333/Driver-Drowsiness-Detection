@@ -41,10 +41,13 @@ class AlertManager:
     - A level is entered when the score reaches its threshold and kept until
       the score falls ``hysteresis`` below it, which prevents flicker.
     - Staying at ALARM for ``escalate_after_s`` escalates to CRITICAL.
-    - CRITICAL is held for at least ``level3_hold_s`` after its cause clears.
+    - ALARM is held for at least ``level2_hold_s`` and CRITICAL for at least
+      ``level3_hold_s`` after their cause clears, so the sound never stutters.
     - A microsleep raises at least ALARM, independent of the fusion weights.
     - Losing the face escalates WARNING -> ALARM -> CRITICAL over time, since
       a slumped head or blocked camera must not fail silently.
+    - While the face is missing the level never goes down: there is no
+      evidence that the driver has recovered.
     """
 
     def __init__(self, config: AlertConfig):
@@ -54,6 +57,7 @@ class AlertManager:
     def reset(self) -> None:
         self.level = AlertLevel.NONE
         self._alarm_since: float | None = None
+        self._alarm_until = float("-inf")
         self._critical_until = float("-inf")
         self._no_face_since: float | None = None
 
@@ -78,10 +82,18 @@ class AlertManager:
         else:
             self._alarm_since = None
 
+        if level >= AlertLevel.ALARM:
+            self._alarm_until = t + cfg.level2_hold_s
+        elif t < self._alarm_until:
+            level, reason = AlertLevel.ALARM, "alarm hold"
+
         if level == AlertLevel.CRITICAL:
             self._critical_until = t + cfg.level3_hold_s
         elif t < self._critical_until:
             level, reason = AlertLevel.CRITICAL, "critical alert hold"
+
+        if not face_detected and level < self.level:
+            level, reason = self.level, "driver's face not visible; keeping the alert"
 
         if level == self.level:
             return None

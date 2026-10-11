@@ -25,14 +25,23 @@ def test_baseline_from_open_eyes():
     assert cal.done
     base = cal.result
     assert base.calibrated
-    assert base.ear_threshold == pytest.approx(0.32 * 0.75)
+    assert base.ear_threshold == pytest.approx(0.32 * CalibrationConfig().ear_closed_ratio)
     assert (base.pitch, base.roll) == (pytest.approx(5.0), pytest.approx(-2.0))
 
 
-def test_threshold_is_clamped():
+def test_default_ratio_tolerates_squinting():
+    # 0.60 of the open EAR: a squint or smile at ~70% of open is not "closed".
     cal = Calibrator(CalibrationConfig(duration_s=1.0), default_ear_threshold=0.21)
+    _feed(cal, 1.5, _signals(ear=0.36))
+    assert cal.result.ear_threshold == pytest.approx(0.216)
+    assert cal.result.ear_threshold < 0.36 * 0.70
+
+
+def test_threshold_is_clamped():
+    config = CalibrationConfig(duration_s=1.0, ear_closed_ratio=0.75)
+    cal = Calibrator(config, default_ear_threshold=0.21)
     _feed(cal, 1.5, _signals(ear=0.42))  # 0.42 * 0.75 = 0.315 > max 0.30
-    assert cal.result.ear_threshold == CalibrationConfig().max_ear_threshold
+    assert cal.result.ear_threshold == config.max_ear_threshold
 
 
 def test_closed_eyes_are_rejected_and_calibration_restarts():

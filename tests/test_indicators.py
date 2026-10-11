@@ -127,3 +127,81 @@ def test_head_recovery_resets():
     _, t = _feed(ind, 0.0, 3.0, 25.0, 0.0)
     state, _ = _feed(ind, t, 0.1, 0.0, 0.0)
     assert state.score == 0.0
+
+
+# --- debounce: one flickering frame must not reset a timer ------------------
+
+
+def test_head_tilt_survives_one_upright_frame():
+    ind = HeadTiltIndicator(15, 20, 2.0, debounce_s=0.20)
+    _, t = _feed(ind, 0.0, 1.0, 25.0, 0.0)
+    _, t = _feed(ind, t, DT, 0.0, 0.0)  # one frame of landmark flicker
+    state, _ = _feed(ind, t, 1.0, 25.0, 0.0)
+    assert state.tilt_duration_s == pytest.approx(2.03, abs=0.05)
+    assert state.score == 1.0
+
+
+def test_head_upright_beyond_debounce_ends_the_tilt():
+    ind = HeadTiltIndicator(15, 20, 2.0, debounce_s=0.20)
+    _, t = _feed(ind, 0.0, 1.0, 25.0, 0.0)
+    state, _ = _feed(ind, t, 0.3, 0.0, 0.0)
+    assert state.tilt_duration_s == 0.0 and state.score == 0.0
+
+
+def test_yawn_survives_one_low_mar_frame():
+    ind = YawnIndicator(0.5, 1.5, 60.0, 3, debounce_s=0.20)
+    _, t = _feed(ind, 0.0, 1.0, 0.8)
+    _, t = _feed(ind, t, DT, 0.3)  # one frame where the lips flicker closed
+    state, _ = _feed(ind, t, 0.6, 0.8)
+    assert state.yawn_count == 1 and state.yawning
+
+
+def test_mouth_closed_beyond_debounce_ends_the_yawn():
+    ind = YawnIndicator(0.5, 1.5, 60.0, 3, debounce_s=0.20)
+    _, t = _feed(ind, 0.0, 1.0, 0.8)
+    _, t = _feed(ind, t, 0.3, 0.3)
+    state, _ = _feed(ind, t, 0.6, 0.8)  # a new opening, too short to be a yawn
+    assert state.yawn_count == 0
+
+
+# --- face lost: no phantom time, no frozen state -----------------------------
+
+
+def test_face_lost_ends_closure_without_phantom_time():
+    ind = EyeClosureIndicator(window_s=20.0, perclos_max=0.4, microsleep_s=1.5, debounce_s=0.15)
+    _, t = _feed(ind, 0.0, 3.0, False)
+    _, t = _feed(ind, t, 1.0, True)  # eyes closing...
+    state = ind.face_lost(t + 2.0)  # ...then 2 s unobserved
+    assert state.closed_duration_s == 0.0 and not state.microsleep
+    state, _ = _feed(ind, t + 2.0, 0.3, True)  # back, eyes still closed
+    assert state.closed_duration_s == pytest.approx(0.27, abs=0.05)
+    assert not state.microsleep and state.score < 1.0
+
+
+def test_face_lost_keeps_the_closed_ratio_until_it_ages_out():
+    ind = EyeClosureIndicator(window_s=20.0, perclos_max=0.4, microsleep_s=1.5)
+    _, t = _feed(ind, 0.0, 4.0, True)
+    assert ind.face_lost(t).perclos == pytest.approx(0.2, abs=0.01)  # not zeroed...
+    assert ind.face_lost(t + 25.0).perclos == 0.0  # ...but not frozen either
+
+
+def test_gap_after_face_loss_is_not_counted_as_closed():
+    ind = EyeClosureIndicator(window_s=20.0, perclos_max=0.4, microsleep_s=1.5)
+    _, t = _feed(ind, 0.0, 1.0, False)
+    before = ind.face_lost(t + 5.0).perclos
+    state = ind.update(t + 5.0, True)  # first frame after the gap
+    assert state.perclos == before
+
+
+def test_face_lost_aborts_yawn_and_tilt_in_progress():
+    yawn = YawnIndicator(0.5, 1.5, 60.0, 3, debounce_s=0.20)
+    _, t = _feed(yawn, 0.0, 1.0, 0.8)
+    yawn.face_lost(t + 1.0)
+    state, _ = _feed(yawn, t + 1.0, 1.0, 0.8)  # 1 s more after the loss: not a yawn
+    assert state.yawn_count == 0
+
+    head = HeadTiltIndicator(15, 20, 2.0, debounce_s=0.20)
+    _, t = _feed(head, 0.0, 1.5, 25.0, 0.0)
+    assert head.face_lost(t).score == 0.0
+    state, _ = _feed(head, t + 1.0, 0.5, 25.0, 0.0)
+    assert state.tilt_duration_s == pytest.approx(0.47, abs=0.05)

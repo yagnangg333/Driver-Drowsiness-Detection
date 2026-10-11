@@ -92,10 +92,17 @@ class DrowsinessPipeline:
             ind.perclos_window_s, ind.perclos_max, ind.microsleep_s, ind.closure_debounce_s
         )
         self._yawn = YawnIndicator(
-            ind.yawn_mar_threshold, ind.yawn_min_duration_s, ind.yawn_window_s, ind.yawns_for_max
+            ind.yawn_mar_threshold,
+            ind.yawn_min_duration_s,
+            ind.yawn_window_s,
+            ind.yawns_for_max,
+            ind.yawn_debounce_s,
         )
         self._head = HeadTiltIndicator(
-            ind.head_pitch_threshold_deg, ind.head_roll_threshold_deg, ind.head_tilt_max_s
+            ind.head_pitch_threshold_deg,
+            ind.head_roll_threshold_deg,
+            ind.head_tilt_max_s,
+            ind.head_debounce_s,
         )
         self.alerts = AlertManager(config.alerts)
         self.recalibrate()
@@ -112,6 +119,7 @@ class DrowsinessPipeline:
         for indicator in (self._eye, self._yawn, self._head):
             indicator.reset()
         self.alerts.reset()
+        self._face_missing_since: float | None = None
 
     def process(self, frame_bgr: np.ndarray, timestamp: float) -> FrameReport:
         face = self._landmarker.detect(frame_bgr, timestamp)
@@ -121,7 +129,10 @@ class DrowsinessPipeline:
         if calibrating:
             self._calibrator.update(timestamp, signals)
         elif signals is not None:
+            self._face_missing_since = None
             self._update_indicators(timestamp, signals, self._calibrator.result)
+        else:
+            self._handle_missing_face(timestamp)
 
         fusion = self.fusion.fuse(
             IndicatorScores(self._eye.state.score, self._yawn.state.score, self._head.state.score)
@@ -147,6 +158,18 @@ class DrowsinessPipeline:
             alert_level=self.alerts.level,
             event=event,
         )
+
+    def _handle_missing_face(self, t: float) -> None:
+        # A short dropout (one or two lost frames) keeps every timer running, so
+        # a real microsleep is not reset by a flicker. A longer loss clears the
+        # continuous timers: nothing unobserved may be counted as eyes closed,
+        # which would otherwise fire a phantom microsleep when the face returns.
+        # Alerting during the loss itself is handled by the alert manager.
+        if self._face_missing_since is None:
+            self._face_missing_since = t
+        if t - self._face_missing_since >= self.config.indicators.face_loss_grace_s:
+            for indicator in (self._eye, self._yawn, self._head):
+                indicator.face_lost(t)
 
     def _update_indicators(self, t: float, signals: FaceSignals, baseline: Baseline) -> None:
         self._eye.update(t, signals.ear < baseline.ear_threshold)

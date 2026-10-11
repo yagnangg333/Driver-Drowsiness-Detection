@@ -77,7 +77,7 @@ class CalibrationConfig:
     duration_s: float = 5.0
     min_samples: int = 30
     # Eyes count as closed below this fraction of the driver's open-eye EAR.
-    ear_closed_ratio: float = 0.75
+    ear_closed_ratio: float = 0.60
     min_ear_threshold: float = 0.12
     max_ear_threshold: float = 0.30
     # Plausibility checks: a baseline outside these limits (eyes already closed,
@@ -118,10 +118,18 @@ class IndicatorConfig:
     yawn_min_duration_s: float = 1.5
     yawn_window_s: float = 60.0
     yawns_for_max: int = 3
+    # A yawn in progress only ends once MAR stays below the threshold this long.
+    yawn_debounce_s: float = 0.20
     # Head tilt, relative to the calibrated neutral pose
     head_pitch_threshold_deg: float = 15.0
     head_roll_threshold_deg: float = 20.0
     head_tilt_max_s: float = 2.0
+    # A tilt only ends once the head stays upright this long.
+    head_debounce_s: float = 0.20
+    # Face missing for less than this keeps all indicator state (a dropped
+    # frame); longer losses clear the continuous timers so no time passes
+    # unobserved into a closure, yawn or tilt.
+    face_loss_grace_s: float = 0.30
 
     def __post_init__(self) -> None:
         _require_positive(
@@ -139,7 +147,13 @@ class IndicatorConfig:
             "head_roll_threshold_deg",
             "head_tilt_max_s",
         )
-        _require(self.closure_debounce_s >= 0, "indicators.closure_debounce_s must be >= 0")
+        for name in (
+            "closure_debounce_s",
+            "yawn_debounce_s",
+            "head_debounce_s",
+            "face_loss_grace_s",
+        ):
+            _require(getattr(self, name) >= 0, f"indicators.{name} must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -161,6 +175,9 @@ class AlertConfig:
     level3_threshold: float = 0.65
     hysteresis: float = 0.05
     escalate_after_s: float = 5.0
+    # Once raised, an alarm (or critical) sounds for at least this long, so it
+    # does not stutter on and off.
+    level2_hold_s: float = 1.5
     level3_hold_s: float = 5.0
     # A microsleep (eyes closed for indicators.microsleep_s) always raises at
     # least an alarm, whatever the fusion weights.
@@ -179,6 +196,7 @@ class AlertConfig:
             raise ConfigError("alert thresholds must satisfy 0 < level1 < level2 < level3 <= 1")
         _require(self.hysteresis >= 0, "alerts.hysteresis must be >= 0")
         _require_positive("alerts", self, "escalate_after_s", "no_face_warning_s")
+        _require(self.level2_hold_s >= 0, "alerts.level2_hold_s must be >= 0")
         _require(self.level3_hold_s >= 0, "alerts.level3_hold_s must be >= 0")
         _require(
             self.no_face_warning_s < self.no_face_alarm_s < self.no_face_critical_s,
