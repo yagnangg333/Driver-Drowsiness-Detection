@@ -11,7 +11,13 @@ from collections import Counter
 from pathlib import Path
 
 from drowsiness import __version__
-from drowsiness.config import AppConfig, ConfigError, load_config, resolve_path
+from drowsiness.config import (
+    FUSION_STRATEGIES,
+    AppConfig,
+    ConfigError,
+    load_config,
+    resolve_path,
+)
 
 log = logging.getLogger("drowsiness")
 
@@ -46,6 +52,11 @@ def _build_parser() -> argparse.ArgumentParser:
     def add_common(p: argparse.ArgumentParser) -> None:
         p.add_argument("--config", type=Path, help="TOML file overriding the defaults")
         p.add_argument("--no-calibration", action="store_true", help="skip per-driver calibration")
+        p.add_argument(
+            "--fusion",
+            choices=FUSION_STRATEGIES,
+            help="fusion strategy that drives the alerts (default: from the config)",
+        )
 
     run = sub.add_parser("run", help="live detection in an OpenCV window")
     add_common(run)
@@ -82,6 +93,10 @@ def _load(args: argparse.Namespace) -> AppConfig:
     if args.no_calibration:
         config = dataclasses.replace(
             config, calibration=dataclasses.replace(config.calibration, enabled=False)
+        )
+    if args.fusion:
+        config = dataclasses.replace(
+            config, fusion=dataclasses.replace(config.fusion, strategy=args.fusion)
         )
     return config
 
@@ -187,6 +202,7 @@ def _cmd_process(args: argparse.Namespace) -> int:
     out = args.out or args.video.with_suffix(".signals.csv")
     events = EventLog(log_dir=None)
     level_frames: Counter[AlertLevel] = Counter()
+    condition_frames: Counter[str] = Counter()
     faces = 0
 
     with (
@@ -199,6 +215,8 @@ def _cmd_process(args: argparse.Namespace) -> int:
             recorder.write(report)
             faces += report.face_detected
             level_frames[report.alert_level] += 1
+            if report.face_detected:
+                condition_frames[report.conditions.label] += 1
             if report.event:
                 events.record(report.event)
 
@@ -208,6 +226,9 @@ def _cmd_process(args: argparse.Namespace) -> int:
         return 1
     print(f"\nProcessed {total} frames from {args.video}")
     print(f"  face detected: {faces / total:.1%}")
+    print(f"  fusion driving alerts: {config.fusion.strategy}")
+    for label, count in condition_frames.most_common():
+        print(f"  conditions {label}: {count / max(faces, 1):.1%} of face frames")
     for level in AlertLevel:
         print(f"  {level.label:<9} {level_frames[level] / total:6.1%} of frames")
     print(f"  alert changes: {len(events.events)}")

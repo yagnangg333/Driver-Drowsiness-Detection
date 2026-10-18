@@ -46,6 +46,22 @@ def test_int_accepted_for_float():
         ({"landmarker": {"max_faces": 0}}, "max_faces"),
         ({"landmarker": {"min_detection_confidence": 1.5}}, "between 0 and 1"),
         ({"camera": {"width": 0}}, "width must be > 0"),
+        ({"fusion": {"strategy": "magic"}}, "fusion.strategy"),
+        (
+            {
+                "fusion": {
+                    "low_light_eye_weight": 0,
+                    "low_light_yawn_weight": 0,
+                    "low_light_head_weight": 0,
+                }
+            },
+            "low_light weights",
+        ),
+        ({"fusion": {"transition_s": -1.0}}, "transition_s"),
+        ({"conditions": {"low_light_enter": 60.0}}, "low_light_enter < low_light_exit"),
+        ({"conditions": {"occlusion_exit": 0.9}}, "occlusion_exit < occlusion_enter"),
+        ({"conditions": {"glare_fraction": 2.0}}, "between 0 and 1"),
+        ({"conditions": {"smoothing_s": 0.0}}, "smoothing_s must be > 0"),
     ],
 )
 def test_invalid_config_rejected(data, message):

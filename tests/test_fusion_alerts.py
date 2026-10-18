@@ -1,8 +1,9 @@
 import pytest
 
 from drowsiness.alerts import AlertLevel, AlertManager, EventLog
+from drowsiness.conditions import NORMAL, Conditions
 from drowsiness.config import AlertConfig, FusionConfig
-from drowsiness.fusion import IndicatorScores, StaticFusion
+from drowsiness.fusion import AdaptiveFusion, IndicatorScores, StaticFusion, make_fusion
 
 
 def test_static_fusion_normalizes_weights():
@@ -150,3 +151,61 @@ def test_event_log_survives_unwritable_file_and_retries(tmp_path, manager):
     lines = log.path.read_text(encoding="utf-8").splitlines()
     assert not log.write_failed
     assert len(lines) == 1 + 3  # the two missed events were written too
+
+
+# --- adaptive fusion ---
+
+LOW_LIGHT = Conditions(low_light=True)
+OCCLUDED = Conditions(eye_occluded=True)
+
+
+def test_adaptive_equals_static_in_normal_conditions():
+    config = FusionConfig()
+    static, adaptive = StaticFusion(config), AdaptiveFusion(config)
+    scores = IndicatorScores(0.8, 0.3, 0.5)
+    for t in (0.0, 0.1, 0.2):
+        assert adaptive.fuse(scores, NORMAL, t) == static.fuse(scores)
+
+
+@pytest.mark.parametrize("conditions", [LOW_LIGHT, OCCLUDED])
+def test_adaptive_weights_follow_condition_table(conditions):
+    fusion = AdaptiveFusion(FusionConfig(transition_s=0))
+    result = fusion.fuse(IndicatorScores(1.0, 0.0, 0.0), conditions, 0.0)
+    assert result.weights.eye == pytest.approx(0.20)
+    assert result.weights.yawn == pytest.approx(0.35)
+    assert result.weights.head == pytest.approx(0.45)
+    assert result.score == pytest.approx(0.20)
+
+
+def test_adaptive_both_conditions_take_lowest_weight_per_cue():
+    config = FusionConfig(
+        low_light_eye_weight=0.4,
+        low_light_yawn_weight=0.2,
+        low_light_head_weight=0.4,
+        occluded_eye_weight=0.1,
+        occluded_yawn_weight=0.4,
+        occluded_head_weight=0.5,
+    )
+    w = AdaptiveFusion(config).target(Conditions(low_light=True, eye_occluded=True))
+    # min per cue: eye 0.1, yawn 0.2, head 0.4 -> normalised by 0.7
+    assert (w.eye, w.yawn, w.head) == pytest.approx((0.1 / 0.7, 0.2 / 0.7, 0.4 / 0.7))
+
+
+def test_adaptive_weights_change_gradually():
+    fusion = AdaptiveFusion(FusionConfig(transition_s=1.0))
+    scores = IndicatorScores(1.0, 0.0, 0.0)
+    assert fusion.fuse(scores, NORMAL, 0.0).weights.eye == pytest.approx(0.5)
+    halfway = fusion.fuse(scores, LOW_LIGHT, 0.15).weights
+    assert 0.2 < halfway.eye < 0.5
+    assert halfway.eye + halfway.yawn + halfway.head == pytest.approx(1.0)
+    assert fusion.fuse(scores, LOW_LIGHT, 1.2).weights.eye == pytest.approx(0.2)
+    fusion.reset()
+    assert fusion.fuse(scores, LOW_LIGHT, 2.0).weights.eye == pytest.approx(0.2)
+
+
+def test_make_fusion():
+    assert make_fusion(FusionConfig()).name == "adaptive"
+    assert make_fusion(FusionConfig(strategy="static")).name == "static"
+    assert make_fusion(FusionConfig(), "static").name == "static"
+    with pytest.raises(ValueError):
+        make_fusion(FusionConfig(), "magic")

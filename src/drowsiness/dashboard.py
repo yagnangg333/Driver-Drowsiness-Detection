@@ -69,7 +69,17 @@ def _sidebar(config: AppConfig, running: bool) -> tuple[AppConfig, bool]:
         help="Learn the driver's open-eye EAR and neutral head pose during the first seconds.",
     )
 
-    with sb.expander("Fusion weights (static baseline)"):
+    strategy = sb.radio(
+        "Fusion",
+        ["adaptive", "static"],
+        index=["adaptive", "static"].index(config.fusion.strategy),
+        format_func={"adaptive": "Adaptive (condition-aware)", "static": "Static (baseline)"}.get,
+        disabled=running,
+        help="Adaptive fusion trusts the eye cue less in low light or when the eyes are "
+        "occluded. Both scores are always shown in the chart.",
+    )
+
+    with sb.expander("Normal-condition weights"):
         f = config.fusion
         eye = st.slider("Eye closure", 0.0, 1.0, f.eye_weight, 0.05, disabled=running)
         yawn = st.slider("Yawning", 0.0, 1.0, f.yawn_weight, 0.05, disabled=running)
@@ -87,7 +97,11 @@ def _sidebar(config: AppConfig, running: bool) -> tuple[AppConfig, bool]:
             camera=dataclasses.replace(config.camera, index=int(camera)),
             calibration=dataclasses.replace(config.calibration, enabled=calibrate),
             fusion=dataclasses.replace(
-                config.fusion, eye_weight=eye, yawn_weight=yawn, head_weight=head
+                config.fusion,
+                strategy=strategy,
+                eye_weight=eye,
+                yawn_weight=yawn,
+                head_weight=head,
             ),
             alerts=dataclasses.replace(
                 config.alerts,
@@ -128,8 +142,8 @@ def _panel(slot, report: FrameReport) -> None:
     pose = s.pose if s else None
     with slot.container():
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("EAR", f"{s.ear:.3f}" if s else "-")
-        c2.metric("MAR", f"{s.mar:.3f}" if s else "-")
+        c1.metric("EAR", f"{s.ear:.2f}" if s else "-")
+        c2.metric("MAR", f"{s.mar:.2f}" if s else "-")
         c3.metric("Pitch", f"{pose.pitch:+.0f}°" if pose else "-")
         c4.metric("Roll", f"{pose.roll:+.0f}°" if pose else "-")
 
@@ -145,8 +159,18 @@ def _panel(slot, report: FrameReport) -> None:
         st.progress(report.head.score, text=f"Head tilt {report.head.score:.2f}")
         st.progress(
             min(report.fusion.score, 1.0),
-            text=f"**Fused drowsiness score {report.fusion.score:.2f}**",
+            text=f"**Fused drowsiness score {report.fusion.score:.2f}** "
+            f"({report.fusion_name}; static {report.static_score:.2f}, "
+            f"adaptive {report.adaptive_score:.2f})",
         )
+
+        c = report.conditions
+        light = "-" if c.brightness is None else f"{c.brightness:.0f}"
+        if c.normal:
+            st.caption(f"Conditions: normal (face brightness {light})")
+        else:
+            why = f" ({', '.join(c.reasons)})" if c.reasons else ""
+            st.warning(f"Conditions: {c.label}{why}; face brightness {light}")
 
         w = report.fusion.weights
         b = report.baseline
@@ -213,7 +237,8 @@ def _run(config: AppConfig, slots: dict) -> None:
                     history.append(
                         {
                             "time": t,
-                            "fused": report.fusion.score,
+                            "static": report.static_score,
+                            "adaptive": report.adaptive_score,
                             "eye": report.eye.score,
                             "yawn": report.yawn.score,
                             "head": report.head.score,

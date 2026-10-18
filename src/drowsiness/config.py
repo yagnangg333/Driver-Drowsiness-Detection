@@ -157,15 +157,94 @@ class IndicatorConfig:
 
 
 @dataclass(frozen=True)
+class ConditionConfig:
+    """Detection of conditions that make the eye cue unreliable (Phase 3)."""
+
+    # Low light: mean brightness (0-255) of the face region, smoothed over
+    # ``smoothing_s``. Entered below ``low_light_enter``, left above
+    # ``low_light_exit``; the gap stops the condition flickering.
+    low_light_enter: float = 40.0
+    low_light_exit: float = 50.0
+    # Eye-region occlusion. Each frame counts as "occluded" if any of these hold:
+    # glare: this fraction of eye-region pixels at or above ``glare_level``
+    glare_level: int = 245
+    glare_fraction: float = 0.05
+    # flat eye region (dark glasses, a hand): eye contrast below this fraction
+    # of the face's contrast
+    min_eye_contrast_ratio: float = 0.25
+    # one eye reads very differently from the other (|L - R| / max(L, R)),
+    # checked only while the head faces roughly forward
+    max_ear_asymmetry: float = 0.5
+    asymmetry_max_yaw_deg: float = 25.0
+    # The share of recent frames that were occluded is smoothed over
+    # ``smoothing_s``; the condition starts above ``occlusion_enter`` and ends
+    # below ``occlusion_exit``.
+    occlusion_enter: float = 0.6
+    occlusion_exit: float = 0.3
+    smoothing_s: float = 1.0
+    # While the eyes are occluded a microsleep reading is not trusted to force an
+    # alarm on its own; the eye score still counts at its reduced weight.
+    microsleep_needs_visible_eyes: bool = True
+
+    def __post_init__(self) -> None:
+        _require(
+            0 <= self.low_light_enter < self.low_light_exit <= 255,
+            "conditions: need 0 <= low_light_enter < low_light_exit <= 255",
+        )
+        _require(0 < self.glare_level <= 255, "conditions.glare_level must be in 1..255")
+        _require_fraction("conditions", self, "glare_fraction", "min_eye_contrast_ratio")
+        _require_positive(
+            "conditions", self, "max_ear_asymmetry", "asymmetry_max_yaw_deg", "smoothing_s"
+        )
+        _require(
+            0 <= self.occlusion_exit < self.occlusion_enter <= 1,
+            "conditions: need 0 <= occlusion_exit < occlusion_enter <= 1",
+        )
+
+
+FUSION_STRATEGIES = ("adaptive", "static")
+
+
+def _check_weights(name: str, weights: tuple[float, float, float]) -> None:
+    if any(w < 0 for w in weights) or sum(weights) <= 0:
+        raise ConfigError(f"fusion {name} weights must be non-negative and not all zero")
+
+
+@dataclass(frozen=True)
 class FusionConfig:
+    # "adaptive" changes the weights with the detected conditions; "static"
+    # always uses the normal-condition weights (the baseline).
+    strategy: str = "adaptive"
+    # Normal conditions; also the static baseline.
     eye_weight: float = 0.5
     yawn_weight: float = 0.2
     head_weight: float = 0.3
+    # Low light: eye landmarks get noisy, so trust mouth and head more.
+    low_light_eye_weight: float = 0.2
+    low_light_yawn_weight: float = 0.35
+    low_light_head_weight: float = 0.45
+    # Eye region occluded (glare, dark glasses, hand).
+    occluded_eye_weight: float = 0.2
+    occluded_yawn_weight: float = 0.35
+    occluded_head_weight: float = 0.45
+    # Weights move to a new condition's values over this long instead of jumping.
+    transition_s: float = 1.0
 
     def __post_init__(self) -> None:
-        weights = (self.eye_weight, self.yawn_weight, self.head_weight)
-        if any(w < 0 for w in weights) or sum(weights) <= 0:
-            raise ConfigError("fusion weights must be non-negative and not all zero")
+        _require(
+            self.strategy in FUSION_STRATEGIES,
+            f"fusion.strategy must be one of {', '.join(FUSION_STRATEGIES)}",
+        )
+        _check_weights("normal", (self.eye_weight, self.yawn_weight, self.head_weight))
+        _check_weights(
+            "low_light",
+            (self.low_light_eye_weight, self.low_light_yawn_weight, self.low_light_head_weight),
+        )
+        _check_weights(
+            "occluded",
+            (self.occluded_eye_weight, self.occluded_yawn_weight, self.occluded_head_weight),
+        )
+        _require(self.transition_s >= 0, "fusion.transition_s must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -214,6 +293,7 @@ class AppConfig:
     landmarker: LandmarkerConfig = field(default_factory=LandmarkerConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     indicators: IndicatorConfig = field(default_factory=IndicatorConfig)
+    conditions: ConditionConfig = field(default_factory=ConditionConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     alerts: AlertConfig = field(default_factory=AlertConfig)
 

@@ -6,10 +6,9 @@ import cv2
 import numpy as np
 
 from drowsiness.alerts import AlertLevel
+from drowsiness.conditions import LEFT_EYE_CONTOUR, RIGHT_EYE_CONTOUR
 from drowsiness.pipeline import FrameReport
 
-LEFT_EYE_CONTOUR = (33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246)
-RIGHT_EYE_CONTOUR = (362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398)
 INNER_LIPS = (
     78,
     95,
@@ -74,8 +73,9 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
         f"MAR  {s.mar:.3f}" if s else "MAR  --",
         f"Pitch {pose.pitch:+.0f}  Roll {pose.roll:+.0f}" if pose else "Pose --",
         f"Eyes closed {report.eye.perclos * 100:.0f}%",
+        f"Cond: {report.conditions.label}",
     ]
-    _panel(frame, (8, 8), (205, 20 + 20 * len(lines) + 3 * 18))
+    _panel(frame, (8, 8), (205, 20 + 20 * len(lines) + 3 * 18 + 18))
     y = 28
     for line in lines:
         _text(frame, line, (16, y), 0.5)
@@ -87,6 +87,8 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
     ):
         _bar(frame, name, value, (16, y - 10))
         y += 18
+    w = report.fusion.weights
+    _text(frame, f"w {w.eye:.2f}/{w.yawn:.2f}/{w.head:.2f}", (16, y + 2), 0.45)
 
 
 def _draw_banner(frame: np.ndarray, report: FrameReport) -> None:

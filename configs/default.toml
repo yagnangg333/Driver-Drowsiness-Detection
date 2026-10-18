@@ -49,10 +49,37 @@ head_debounce_s = 0.20              # head must stay upright this long to end a 
 face_loss_grace_s = 0.30            # shorter face dropouts keep indicator state;
                                     # longer ones clear closure/yawn/tilt timers
 
+[conditions]
+# Low light: smoothed mean brightness (0-255) of the face region.
+low_light_enter = 40.0              # below this the light counts as low...
+low_light_exit = 50.0               # ...until it rises above this again
+# Eye-region occlusion: a frame counts as occluded if any check fires.
+glare_level = 245                   # grey level counted as glare
+glare_fraction = 0.05               # glare on this share of an eye region
+min_eye_contrast_ratio = 0.25       # eye region this flat vs the face: covered
+max_ear_asymmetry = 0.5             # one eye reads this differently: one eye hidden
+asymmetry_max_yaw_deg = 25.0        # (asymmetry checked only when facing ahead)
+occlusion_enter = 0.6               # share of recent frames occluded to start...
+occlusion_exit = 0.3                # ...and to end the condition
+smoothing_s = 1.0                   # time constant of the moving averages
+microsleep_needs_visible_eyes = true  # with eyes occluded, a microsleep does not
+                                      # force an alarm on its own
+
 [fusion]
+strategy = "adaptive"               # "adaptive" or "static" (fixed weights, baseline)
+# Normal conditions (also the static baseline)
 eye_weight = 0.5
 yawn_weight = 0.2
 head_weight = 0.3
+# Low light: the eye cue gets noisy, so trust mouth and head more
+low_light_eye_weight = 0.2
+low_light_yawn_weight = 0.35
+low_light_head_weight = 0.45
+# Eye region occluded (glare, dark glasses, hand)
+occluded_eye_weight = 0.2
+occluded_yawn_weight = 0.35
+occluded_head_weight = 0.45
+transition_s = 1.0                  # weights move to new values over this long
 
 [alerts]
 level1_threshold = 0.25             # on-screen warning

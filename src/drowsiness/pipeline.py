@@ -1,4 +1,7 @@
-"""End-to-end per-frame processing: landmarks -> signals -> indicators -> fusion -> alerts."""
+"""End-to-end per-frame processing.
+
+landmarks -> signals -> conditions + indicators -> fusion -> alerts
+"""
 
 from __future__ import annotations
 
@@ -9,8 +12,15 @@ import numpy as np
 
 from drowsiness.alerts import AlertEvent, AlertLevel, AlertManager
 from drowsiness.calibration import Baseline, Calibrator
+from drowsiness.conditions import ConditionDetector, Conditions, measure
 from drowsiness.config import AppConfig
-from drowsiness.fusion import FusionResult, FusionStrategy, IndicatorScores, StaticFusion
+from drowsiness.fusion import (
+    AdaptiveFusion,
+    FusionResult,
+    FusionStrategy,
+    IndicatorScores,
+    StaticFusion,
+)
 from drowsiness.indicators import (
     EyeClosureIndicator,
     EyeState,
@@ -35,7 +45,11 @@ class FrameReport:
     eye: EyeState
     yawn: YawnState
     head: HeadState
-    fusion: FusionResult
+    conditions: Conditions
+    fusion: FusionResult  # from the strategy that drives the alerts
+    fusion_name: str
+    static_score: float  # both strategies on the same scores, for comparison
+    adaptive_score: float
     alert_level: AlertLevel
     event: AlertEvent | None
 
@@ -50,6 +64,7 @@ class FrameReport:
     def to_row(self) -> dict[str, Any]:
         """Flat per-frame record, used for recordings and offline evaluation."""
         s, pose = self.signals, self.signals.pose if self.signals else None
+        c, w = self.conditions, self.fusion.weights
         nan = float("nan")
         return {
             "timestamp_s": round(self.timestamp, 4),
@@ -68,6 +83,16 @@ class FrameReport:
             "eye_score": self.eye.score,
             "yawn_score": self.yawn.score,
             "head_score": self.head.score,
+            "face_brightness": c.brightness if c.brightness is not None else nan,
+            "low_light": int(c.low_light),
+            "eye_occluded": int(c.eye_occluded),
+            "occlusion": c.occlusion,
+            "eye_weight": w.eye,
+            "yawn_weight": w.yawn,
+            "head_weight": w.head,
+            "static_score": self.static_score,
+            "adaptive_score": self.adaptive_score,
+            "fusion": self.fusion_name,
             "fused_score": self.fusion.score,
             "alert_level": int(self.alert_level),
         }
@@ -85,7 +110,11 @@ class DrowsinessPipeline:
         self.config = config
         self._landmarker = landmarker or FaceLandmarker(config.landmarker)
         self._owns_landmarker = landmarker is None
-        self.fusion = fusion or StaticFusion(config.fusion)
+        self._static = StaticFusion(config.fusion)
+        self._adaptive = AdaptiveFusion(config.fusion)
+        default = self._adaptive if config.fusion.strategy == "adaptive" else self._static
+        self.fusion: FusionStrategy = fusion or default
+        self._conditions = ConditionDetector(config.conditions)
 
         ind = config.indicators
         self._eye = EyeClosureIndicator(
@@ -118,12 +147,21 @@ class DrowsinessPipeline:
         )
         for indicator in (self._eye, self._yawn, self._head):
             indicator.reset()
+        for fusion in (self._static, self._adaptive, self.fusion):
+            fusion.reset()
+        self._conditions.reset()
         self.alerts.reset()
         self._face_missing_since: float | None = None
 
     def process(self, frame_bgr: np.ndarray, timestamp: float) -> FrameReport:
         face = self._landmarker.detect(frame_bgr, timestamp)
         signals = compute_signals(face) if face is not None else None
+        measured = (
+            measure(frame_bgr, face, signals, self.config.conditions)
+            if face is not None and signals is not None
+            else None
+        )
+        conditions = self._conditions.update(timestamp, measured)
 
         calibrating = not self._calibrator.done
         if calibrating:
@@ -134,14 +172,26 @@ class DrowsinessPipeline:
         else:
             self._handle_missing_face(timestamp)
 
-        fusion = self.fusion.fuse(
-            IndicatorScores(self._eye.state.score, self._yawn.state.score, self._head.state.score)
+        scores = IndicatorScores(
+            self._eye.state.score, self._yawn.state.score, self._head.state.score
+        )
+        static = self._static.fuse(scores, conditions, timestamp)
+        adaptive = self._adaptive.fuse(scores, conditions, timestamp)
+        if self.fusion is self._adaptive:
+            fusion = adaptive
+        elif self.fusion is self._static:
+            fusion = static
+        else:
+            fusion = self.fusion.fuse(scores, conditions, timestamp)
+
+        # A microsleep forces an alarm on its own only while the eyes can be seen;
+        # with the eyes occluded the eye score still counts at its lower weight.
+        microsleep = self._eye.state.microsleep and not (
+            conditions.eye_occluded and self.config.conditions.microsleep_needs_visible_eyes
         )
         event = None
         if not calibrating:
-            event = self.alerts.update(
-                timestamp, fusion.score, face is not None, self._eye.state.microsleep
-            )
+            event = self.alerts.update(timestamp, fusion.score, face is not None, microsleep)
 
         return FrameReport(
             timestamp=timestamp,
@@ -154,7 +204,11 @@ class DrowsinessPipeline:
             eye=self._eye.state,
             yawn=self._yawn.state,
             head=self._head.state,
+            conditions=conditions,
             fusion=fusion,
+            fusion_name=self.fusion.name,
+            static_score=static.score,
+            adaptive_score=adaptive.score,
             alert_level=self.alerts.level,
             event=event,
         )

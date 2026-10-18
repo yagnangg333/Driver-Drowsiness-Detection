@@ -13,7 +13,7 @@ The system tracks the driver's face from a webcam with MediaPipe. It combines th
 |---|---|---|
 | 1 | Landmark pipeline; EAR, MAR, head pose | Implemented; not yet validated on real data |
 | 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | Implemented; not yet validated on real data |
-| 3 | Condition detection (low light, glasses) + adaptive fusion | Planned (CE‑2, Nov 1) |
+| 3 | Condition detection (low light, eye occlusion) + adaptive fusion | Implemented; weights not yet tuned (CE‑2, Nov 1) |
 | 4 | Evaluation vs. static baseline on datasets and own clips | Planned |
 | 5 | Dashboard polish, documentation, final report | Planned (Endsem) |
 
@@ -26,6 +26,8 @@ flowchart LR
     C --> K[Per-driver calibration]
     K --> D[Indicators<br/>closed-eye ratio + microsleep · yawns · head tilt]
     D --> E[Fusion<br/>weighted score 0-1]
+    B --> H[Conditions<br/>low light · eye occlusion]
+    H -->|sets the weights| E
     E --> F[Alert manager<br/>Level 1 / 2 / 3]
     F --> G[Overlay · sound · CSV log · dashboard]
 ```
@@ -48,8 +50,23 @@ flowchart LR
      "Closed" here means EAR below 60% of the open-eye value (75% was tried first, but it also counted smiles, squints and looking down). That is looser than the ≥ 80%-eyelid-closure (P80) definition used by classic PERCLOS, so the ratio is not directly comparable with PERCLOS values in the literature.
    - **Yawning:** the number of yawns in the last 60 seconds. A yawn is the mouth held wide open for at least 1.5 seconds.
    - **Head:** how long the head has been nodded forward by more than 15° or tilted sideways by more than 20°.
-5. **Fusion.** The baseline (`StaticFusion`) is a fixed-weight average: eyes 0.5, yawning 0.2, head 0.3. Phase 3 adds an adaptive strategy behind the same interface, so both can be compared on identical inputs.
-6. **Alerts:**
+5. **Conditions.** Every frame is checked for two conditions that make the eye cue unreliable:
+   - **Low light:** the mean brightness (0–255) of the face region. It is measured on the face, not the whole frame, so a bright window behind the driver does not hide a dark face.
+   - **Eye occlusion:** a frame counts as occluded if there is glare on the eye region (≥ 5% near-white pixels), the eye region is flat compared with the rest of the face (dark glasses, a hand), or the two eyes read very differently while the head faces ahead (one eye hidden). Clear glasses alone do not count.
+
+   Both are smoothed over about 1 s with a time-based exponential moving average and have separate enter and exit thresholds (low light starts below 40 and ends above 50), so a passing shadow or reflection does not switch them.
+6. **Fusion.** The score is a weighted average of the three indicator scores. Two strategies share one interface and both run on every frame, so they are compared on identical inputs:
+   - **Static** (baseline): fixed weights, eyes 0.5, yawning 0.2, head 0.3.
+   - **Adaptive** (default): the weights depend on the conditions. Under normal conditions they equal the static weights, so any difference comes only from adapting.
+
+   | Condition | Eye | Yawn | Head |
+   |---|---|---|---|
+   | Normal | 0.50 | 0.20 | 0.30 |
+   | Low light | 0.20 | 0.35 | 0.45 |
+   | Eye region occluded | 0.20 | 0.35 | 0.45 |
+
+   With both conditions, each cue gets its lower weight before normalising. Weights move to new values over 1 s instead of jumping. While the eyes are occluded, a microsleep reading does not force an alarm on its own (glare can make open eyes read as closed); it still counts through the eye score. These values are starting points to be tuned in Phase 4.
+7. **Alerts:**
 
    | Level | Trigger | Action |
    |---|---|---|
@@ -61,7 +78,7 @@ flowchart LR
 
    **Failing loudly.** Losing the face escalates to an audible alarm, because a slumped head or a blocked camera is exactly when the driver can't be watched. If the camera stops delivering frames, the app retries for 2 s and reopens the device once. If the camera is still gone, or monitoring stops for any other reason after it started, the alarm sounds until you acknowledge it.
 
-   **Limits of the static weights.** The fused score is a weighted average, so a single cue has a ceiling:
+   **Limits of the weights.** The fused score is a weighted average, so with the normal (static) weights a single cue has a ceiling:
    - Yawning alone (max 0.2) never raises an alert.
    - Head tilt alone (max 0.3) only reaches Level 1, which is visual only.
    - Eye closure alone reaches Level 2 from the microsleep rule and Level 3 only by escalation.
@@ -97,7 +114,7 @@ All commands are available as `drowsiness <command>` or `python -m drowsiness <c
 | `drowsiness process clip.mp4` | analyses a video file without a window and writes per-frame signals to a CSV (used for evaluation) |
 | `drowsiness download-model` | fetches the MediaPipe model |
 
-Common options: `--config my.toml`, `--no-calibration`, `--no-sound` and `--source 1` (a camera index or a video file).
+Common options: `--config my.toml`, `--no-calibration`, `--no-sound`, `--source 1` (a camera index or a video file) and `--fusion static|adaptive` (which strategy drives the alerts; the CSV always has both scores, `static_score` and `adaptive_score`, plus the detected conditions and weights).
 
 The dashboard runs one detection session at a time; a second browser tab is told to stop the first. Settings are locked while detection runs.
 
@@ -119,7 +136,8 @@ src/drowsiness/
   signals.py       EAR, MAR, head pose (solvePnP)
   calibration.py   per-driver baseline
   indicators.py    closed-eye ratio/microsleep, yawn, head-tilt scores
-  fusion.py        fusion strategies (StaticFusion baseline)
+  conditions.py    low-light and eye-occlusion detection
+  fusion.py        StaticFusion baseline + AdaptiveFusion
   alerts.py        3-level alert state machine + CSV event log
   audio.py         alarm sound (pygame)
   pipeline.py      per-frame orchestration -> FrameReport
@@ -145,7 +163,7 @@ ruff format src tests        # format
 
 GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `main` and every pull request.
 
-The tests cover the signal maths, timing logic, alerts (including face loss and microsleep), calibration rejection, config validation, camera dropouts, audio, the CLI and a dashboard smoke test. End-to-end tests run the real model on two recorded frames, and head-pose signs are checked against real face geometry. They check that the code behaves as designed. They don't measure detection accuracy; that needs labelled video (Phase 4).
+The tests cover the signal maths, timing logic, alerts (including face loss and microsleep), condition detection and adaptive fusion, calibration rejection, config validation, camera dropouts, audio, the CLI and a dashboard smoke test. End-to-end tests run the real model on two recorded frames (and on copies with simulated low light, dark glasses, glare and a hand over one eye), and head-pose signs are checked against real face geometry. They check that the code behaves as designed. They don't measure detection accuracy; that needs labelled video (Phase 4).
 
 ## Tuning tips
 
