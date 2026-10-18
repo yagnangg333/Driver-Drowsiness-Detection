@@ -58,12 +58,15 @@ glare_level = 245                   # grey level counted as glare
 glare_fraction = 0.05               # glare on this share of an eye region
 min_eye_contrast_ratio = 0.25       # eye region this flat vs the face: covered
 max_ear_asymmetry = 0.5             # one eye reads this differently: one eye hidden
-asymmetry_max_yaw_deg = 25.0        # (asymmetry checked only when facing ahead)
+asymmetry_max_yaw_deg = 25.0        # (asymmetry checked only when facing ahead...
+asymmetry_min_open_ear = 0.20       # ...and at least one eye is clearly open)
 occlusion_enter = 0.6               # share of recent frames occluded to start...
 occlusion_exit = 0.3                # ...and to end the condition
 smoothing_s = 1.0                   # time constant of the moving averages
-microsleep_needs_visible_eyes = true  # with eyes occluded, a microsleep does not
-                                      # force an alarm on its own
+microsleep_needs_visible_eyes = false  # true: with eyes occluded a microsleep no
+                                       # longer forces an alarm on its own (fewer
+                                       # glare false alarms, but a real microsleep
+                                       # behind glare would then raise no alert)
 
 [fusion]
 strategy = "adaptive"               # "adaptive" or "static" (fixed weights, baseline)

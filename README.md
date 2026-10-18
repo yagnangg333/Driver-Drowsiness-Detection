@@ -52,7 +52,7 @@ flowchart LR
    - **Head:** how long the head has been nodded forward by more than 15° or tilted sideways by more than 20°.
 5. **Conditions.** Every frame is checked for two conditions that make the eye cue unreliable:
    - **Low light:** the mean brightness (0–255) of the face region. It is measured on the face, not the whole frame, so a bright window behind the driver does not hide a dark face.
-   - **Eye occlusion:** a frame counts as occluded if there is glare on the eye region (≥ 5% near-white pixels), the eye region is flat compared with the rest of the face (dark glasses, a hand), or the two eyes read very differently while the head faces ahead (one eye hidden). Clear glasses alone do not count.
+   - **Eye occlusion:** a frame counts as occluded if there is glare on the eye region (≥ 5% near-white pixels), the eye region is flat compared with the rest of the face (dark glasses, a hand), or the two eyes read very differently while the head faces ahead and at least one eye is clearly open (one eye hidden). Clear glasses alone do not count, and closing both eyes never counts as an occlusion.
 
    Both are smoothed over about 1 s with a time-based exponential moving average and have separate enter and exit thresholds (low light starts below 40 and ends above 50), so a passing shadow or reflection does not switch them.
 6. **Fusion.** The score is a weighted average of the three indicator scores. Two strategies share one interface and both run on every frame, so they are compared on identical inputs:
@@ -65,7 +65,7 @@ flowchart LR
    | Low light | 0.20 | 0.35 | 0.45 |
    | Eye region occluded | 0.20 | 0.35 | 0.45 |
 
-   With both conditions, each cue gets its lower weight before normalising. Weights move to new values over 1 s instead of jumping. While the eyes are occluded, a microsleep reading does not force an alarm on its own (glare can make open eyes read as closed); it still counts through the eye score. These values are starting points to be tuned in Phase 4.
+   With both conditions, each cue gets its lower weight before normalising. Weights move to new values over 1 s instead of jumping. A microsleep still forces an alarm in every condition: under occlusion the eye weight (0.2) is below the warning threshold (0.25), so without that rule a real microsleep behind glare would raise no alert at all. (`conditions.microsleep_needs_visible_eyes = true` trades that safety for fewer glare false alarms; Phase 4 measures both.) These values are starting points to be tuned in Phase 4.
 7. **Alerts:**
 
    | Level | Trigger | Action |

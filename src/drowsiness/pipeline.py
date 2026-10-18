@@ -184,8 +184,8 @@ class DrowsinessPipeline:
         else:
             fusion = self.fusion.fuse(scores, conditions, timestamp)
 
-        # A microsleep forces an alarm on its own only while the eyes can be seen;
-        # with the eyes occluded the eye score still counts at its lower weight.
+        # Optionally, a microsleep behind an occlusion does not force an alarm on
+        # its own (off by default: see ConditionConfig).
         microsleep = self._eye.state.microsleep and not (
             conditions.eye_occluded and self.config.conditions.microsleep_needs_visible_eyes
         )

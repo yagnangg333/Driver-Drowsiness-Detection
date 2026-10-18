@@ -73,7 +73,7 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
         f"MAR  {s.mar:.3f}" if s else "MAR  --",
         f"Pitch {pose.pitch:+.0f}  Roll {pose.roll:+.0f}" if pose else "Pose --",
         f"Eyes closed {report.eye.perclos * 100:.0f}%",
-        f"Cond: {report.conditions.label}",
+        _conditions_line(report),
     ]
     _panel(frame, (8, 8), (205, 20 + 20 * len(lines) + 3 * 18 + 18))
     y = 28
@@ -89,6 +89,15 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
         y += 18
     w = report.fusion.weights
     _text(frame, f"w {w.eye:.2f}/{w.yawn:.2f}/{w.head:.2f}", (16, y + 2), 0.45)
+
+
+def _conditions_line(report: FrameReport) -> str:
+    c = report.conditions
+    if c.normal:
+        return "Cond: normal"
+    return "Cond: " + "+".join(
+        name for name, on in (("low light", c.low_light), ("eyes hidden", c.eye_occluded)) if on
+    )
 
 
 def _draw_banner(frame: np.ndarray, report: FrameReport) -> None:

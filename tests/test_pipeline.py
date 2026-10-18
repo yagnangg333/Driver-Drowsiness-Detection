@@ -208,8 +208,10 @@ def test_static_strategy_ignores_conditions(config, awake_frame):
 def test_microsleep_needs_visible_eyes(
     config, awake_frame, drowsy_frame, monkeypatch, gate, expect_alarm
 ):
-    """With the eyes occluded an "eyes closed" reading may be glare, so a
-    microsleep alone must not force the alarm (unless the gate is turned off)."""
+    """By default a microsleep forces the alarm even with the eyes occluded:
+    the occluded eye weight alone is below the warning threshold, so without
+    the rule a real microsleep behind glare would go unnoticed. The optional
+    gate trades that for fewer glare false alarms."""
     from drowsiness import pipeline as pipeline_module
     from drowsiness.conditions import FrameConditions
 

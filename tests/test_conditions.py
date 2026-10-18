@@ -7,11 +7,12 @@ from drowsiness.conditions import (
     RIGHT_EYE_CONTOUR,
     ConditionDetector,
     FrameConditions,
+    ear_asymmetry,
     measure,
 )
 from drowsiness.config import ConditionConfig
 from drowsiness.landmarks import FaceLandmarker
-from drowsiness.signals import compute_signals
+from drowsiness.signals import FaceSignals, HeadPose, compute_signals
 
 from .conftest import requires_model
 
@@ -157,3 +158,18 @@ def test_measure_on_real_face(awake_frame, kind, dark, occluded):
     measured = measure(frame, face, compute_signals(face), config)
     assert (measured.face_brightness < config.low_light_enter) == dark
     assert bool(measured.occlusion_reasons(config)) == occluded
+
+
+@pytest.mark.parametrize(
+    "left, right, yaw, expected",
+    [
+        (0.33, 0.32, 0.0, pytest.approx(0.03, abs=0.01)),  # both open
+        (0.30, 0.12, 0.0, pytest.approx(0.6)),  # one eye open, one reads closed
+        (0.05, 0.10, 0.0, None),  # both nearly shut: closing the eyes is not occlusion
+        (0.03, 0.08, 0.0, None),
+        (0.30, 0.12, 40.0, None),  # head turned: the far eye is foreshortened
+    ],
+)
+def test_ear_asymmetry(left, right, yaw, expected):
+    signals = FaceSignals(left, right, 0.1, HeadPose(0.0, yaw, 0.0))
+    assert ear_asymmetry(signals, ConditionConfig()) == expected

@@ -39,7 +39,8 @@ class FrameConditions:
     face_brightness: float  # mean grey level of the face region, 0-255
     glare_fraction: float  # share of eye-region pixels that are near white
     eye_contrast_ratio: float  # eye-region contrast / face contrast
-    ear_asymmetry: float | None  # |L - R| / max(L, R); None when the head is turned
+    # |L - R| / max(L, R); None when not checked (head turned or both eyes shut)
+    ear_asymmetry: float | None
 
     def occlusion_reasons(self, config: ConditionConfig) -> tuple[str, ...]:
         reasons = []
@@ -103,13 +104,16 @@ def measure(
     eye_contrast = min(contrast, default=0.0)
     ratio = eye_contrast / face_contrast if face_contrast > 1e-6 else 0.0
 
-    asymmetry = None
+    return FrameConditions(face_brightness, glare_fraction, ratio, ear_asymmetry(signals, config))
+
+
+def ear_asymmetry(signals: FaceSignals, config: ConditionConfig) -> float | None:
+    """How differently the two eyes read, or None when that is not meaningful."""
     turned = signals.pose is not None and abs(signals.pose.yaw) > config.asymmetry_max_yaw_deg
     widest = max(signals.ear_left, signals.ear_right)
-    if not turned and widest > 1e-6:
-        asymmetry = abs(signals.ear_left - signals.ear_right) / widest
-
-    return FrameConditions(face_brightness, glare_fraction, ratio, asymmetry)
+    if turned or widest < config.asymmetry_min_open_ear:
+        return None
+    return abs(signals.ear_left - signals.ear_right) / widest
 
 
 def _crop_gray(frame_bgr: np.ndarray, points: np.ndarray, pad: float = 0.0) -> np.ndarray:

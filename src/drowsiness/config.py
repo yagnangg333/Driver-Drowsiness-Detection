@@ -173,18 +173,23 @@ class ConditionConfig:
     # of the face's contrast
     min_eye_contrast_ratio: float = 0.25
     # one eye reads very differently from the other (|L - R| / max(L, R)),
-    # checked only while the head faces roughly forward
+    # checked only while the head faces roughly forward and at least one eye is
+    # clearly open: with both eyes nearly shut the ratio of two tiny values is
+    # meaningless, and closing the eyes must never look like an occlusion.
     max_ear_asymmetry: float = 0.5
     asymmetry_max_yaw_deg: float = 25.0
+    asymmetry_min_open_ear: float = 0.20
     # The share of recent frames that were occluded is smoothed over
     # ``smoothing_s``; the condition starts above ``occlusion_enter`` and ends
     # below ``occlusion_exit``.
     occlusion_enter: float = 0.6
     occlusion_exit: float = 0.3
     smoothing_s: float = 1.0
-    # While the eyes are occluded a microsleep reading is not trusted to force an
-    # alarm on its own; the eye score still counts at its reduced weight.
-    microsleep_needs_visible_eyes: bool = True
+    # If true, a microsleep does not force an alarm on its own while the eyes are
+    # occluded (glare can make open eyes read as closed). Off by default: the eye
+    # weight under occlusion (0.2) is below the warning threshold, so with it on
+    # a real microsleep behind glare would raise no alert at all.
+    microsleep_needs_visible_eyes: bool = False
 
     def __post_init__(self) -> None:
         _require(
@@ -194,7 +199,12 @@ class ConditionConfig:
         _require(0 < self.glare_level <= 255, "conditions.glare_level must be in 1..255")
         _require_fraction("conditions", self, "glare_fraction", "min_eye_contrast_ratio")
         _require_positive(
-            "conditions", self, "max_ear_asymmetry", "asymmetry_max_yaw_deg", "smoothing_s"
+            "conditions",
+            self,
+            "max_ear_asymmetry",
+            "asymmetry_max_yaw_deg",
+            "asymmetry_min_open_ear",
+            "smoothing_s",
         )
         _require(
             0 <= self.occlusion_exit < self.occlusion_enter <= 1,
