@@ -220,7 +220,13 @@ def test_microsleep_needs_visible_eyes(
         conditions=dataclasses.replace(config.conditions, microsleep_needs_visible_eyes=gate),
     )
     real_measure = pipeline_module.measure
-    occluded = FrameConditions(80, glare_fraction=0.3, eye_contrast_ratio=0.5, ear_asymmetry=0)
+    occluded = FrameConditions(
+        face_brightness=80,
+        frame_brightness=120,
+        glare_fraction=0.3,
+        eye_contrast_ratio=0.5,
+        ear_asymmetry=0,
+    )
     with DrowsinessPipeline(config) as pipeline:
         _, t = _feed(pipeline, awake_frame, 2.5, 0.0)
         monkeypatch.setattr(pipeline_module, "measure", lambda *a: occluded)

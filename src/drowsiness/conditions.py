@@ -2,7 +2,9 @@
 
 Two conditions are tracked:
 
-- **Low light**: the face region is dark, so eye landmarks get noisy.
+- **Low light**: the scene is dark, so eye landmarks get noisy. Cameras
+  brighten dark scenes automatically, so this is read from the whole frame's
+  brightness rather than from how bright the face looks.
 - **Eye occlusion**: the eye region cannot be seen properly, because of glare on
   glasses, dark glasses or a hand. Clear glasses alone do not count.
 
@@ -37,12 +39,14 @@ class FrameConditions:
     """Raw per-frame measurements."""
 
     face_brightness: float  # mean grey level of the face region, 0-255
+    frame_brightness: float  # mean grey level of the whole frame, 0-255
     glare_fraction: float  # share of eye-region pixels that are near white
     eye_contrast_ratio: float  # eye-region contrast / face contrast
     # |L - R| / max(L, R); None when not checked (head turned or both eyes shut)
     ear_asymmetry: float | None
 
     def occlusion_reasons(self, config: ConditionConfig) -> tuple[str, ...]:
+        """Why the eyes look occluded in this frame (empty if they do not)."""
         reasons = []
         if self.glare_fraction >= config.glare_fraction:
             reasons.append("glare")
@@ -59,7 +63,7 @@ class Conditions:
 
     low_light: bool = False
     eye_occluded: bool = False
-    brightness: float | None = None  # smoothed face brightness
+    brightness: float | None = None  # smoothed whole-frame brightness
     occlusion: float = 0.0  # smoothed share of recent frames that were occluded
     reasons: tuple[str, ...] = ()  # why the eyes count as occluded
 
@@ -104,7 +108,16 @@ def measure(
     eye_contrast = min(contrast, default=0.0)
     ratio = eye_contrast / face_contrast if face_contrast > 1e-6 else 0.0
 
-    return FrameConditions(face_brightness, glare_fraction, ratio, ear_asymmetry(signals, config))
+    # Every 4th pixel is plenty for an average and keeps this cheap.
+    small = np.ascontiguousarray(frame_bgr[::4, ::4])
+    frame_brightness = float(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).mean())
+    return FrameConditions(
+        face_brightness,
+        frame_brightness,
+        glare_fraction,
+        ratio,
+        ear_asymmetry(signals, config),
+    )
 
 
 def ear_asymmetry(signals: FaceSignals, config: ConditionConfig) -> float | None:
@@ -151,21 +164,22 @@ class ConditionDetector:
             return self.state
         cfg = self._config
         reasons = frame.occlusion_reasons(cfg)
+        occluded_now = 1.0 if reasons else 0.0
 
         if self._last_t is None or self._brightness is None:
             # First observation: start from it instead of averaging with nothing.
-            self._brightness = frame.face_brightness
-            self._occlusion = 1.0 if reasons else 0.0
+            self._brightness = frame.frame_brightness
+            self._occlusion = occluded_now
         else:
             alpha = 1.0 - math.exp(-max(t - self._last_t, 0.0) / cfg.smoothing_s)
-            self._brightness += alpha * (frame.face_brightness - self._brightness)
-            self._occlusion += alpha * ((1.0 if reasons else 0.0) - self._occlusion)
+            self._brightness += alpha * (frame.frame_brightness - self._brightness)
+            self._occlusion += alpha * (occluded_now - self._occlusion)
         self._last_t = t
 
         low_light = self.state.low_light
-        if low_light and self._brightness > cfg.low_light_exit:
+        if low_light and self._brightness > cfg.low_light_brightness + cfg.low_light_margin:
             low_light = False
-        elif not low_light and self._brightness < cfg.low_light_enter:
+        elif not low_light and self._brightness < cfg.low_light_brightness:
             low_light = True
 
         occluded = self.state.eye_occluded

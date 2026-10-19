@@ -166,11 +166,12 @@ def _panel(slot, report: FrameReport) -> None:
 
         c = report.conditions
         light = "-" if c.brightness is None else f"{c.brightness:.0f}"
+        detail = f"scene brightness {light}"
         if c.normal:
-            st.caption(f"Conditions: normal (face brightness {light})")
+            st.caption(f"Conditions: normal ({detail})")
         else:
             why = f" ({', '.join(c.reasons)})" if c.reasons else ""
-            st.warning(f"Conditions: {c.label}{why}; face brightness {light}")
+            st.warning(f"Conditions: {c.label}{why}; {detail}")
 
         w = report.fusion.weights
         b = report.baseline

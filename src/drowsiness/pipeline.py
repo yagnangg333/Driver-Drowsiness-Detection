@@ -83,7 +83,7 @@ class FrameReport:
             "eye_score": self.eye.score,
             "yawn_score": self.yawn.score,
             "head_score": self.head.score,
-            "face_brightness": c.brightness if c.brightness is not None else nan,
+            "frame_brightness": c.brightness if c.brightness is not None else nan,
             "low_light": int(c.low_light),
             "eye_occluded": int(c.eye_occluded),
             "occlusion": c.occlusion,

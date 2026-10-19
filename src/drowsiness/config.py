@@ -160,18 +160,27 @@ class IndicatorConfig:
 class ConditionConfig:
     """Detection of conditions that make the eye cue unreliable (Phase 3)."""
 
-    # Low light: mean brightness (0-255) of the face region, smoothed over
-    # ``smoothing_s``. Entered below ``low_light_enter``, left above
-    # ``low_light_exit``; the gap stops the condition flickering.
-    low_light_enter: float = 40.0
-    low_light_exit: float = 50.0
-    # Eye-region occlusion. Each frame counts as "occluded" if any of these hold:
+    # Low light. Cameras brighten dark scenes automatically, so the face itself
+    # rarely looks dark at night, but the frame as a whole does (the dark car,
+    # the road outside). Low light starts when the smoothed whole-frame
+    # brightness (0-255) falls below ``low_light_brightness`` and ends once it
+    # rises ``low_light_margin`` above it. Tuned on real night (NITYMED) vs day
+    # (YawDD, UTA-RLDD) footage with tools/tune_conditions.py.
+    low_light_brightness: float = 76.0
+    low_light_margin: float = 8.0
+    # Eye-region occlusion: the eyes cannot be seen at all. Each frame counts as
+    # "occluded" if any of these hold. Thresholds tuned on real footage
+    # (tools/tune_conditions.py) to flag at most 3% of frames of uncovered eyes
+    # in any dataset, day or night: a false occlusion would lower the eye weight
+    # for a driver whose eyes are perfectly visible. Lightly tinted sunglasses
+    # are deliberately not flagged; landmarks read the eyes through them as
+    # well as through clear glasses.
     # glare: this fraction of eye-region pixels at or above ``glare_level``
     glare_level: int = 245
-    glare_fraction: float = 0.05
-    # flat eye region (dark glasses, a hand): eye contrast below this fraction
+    glare_fraction: float = 0.15
+    # flat eye region (dark lenses, a hand): eye contrast below this fraction
     # of the face's contrast
-    min_eye_contrast_ratio: float = 0.25
+    min_eye_contrast_ratio: float = 0.10
     # one eye reads very differently from the other (|L - R| / max(L, R)),
     # checked only while the head faces roughly forward and at least one eye is
     # clearly open: with both eyes nearly shut the ratio of two tiny values is
@@ -193,9 +202,10 @@ class ConditionConfig:
 
     def __post_init__(self) -> None:
         _require(
-            0 <= self.low_light_enter < self.low_light_exit <= 255,
-            "conditions: need 0 <= low_light_enter < low_light_exit <= 255",
+            0 <= self.low_light_brightness <= 255,
+            "conditions.low_light_brightness must be in 0..255",
         )
+        _require(self.low_light_margin >= 0, "conditions.low_light_margin must be >= 0")
         _require(0 < self.glare_level <= 255, "conditions.glare_level must be in 1..255")
         _require_fraction("conditions", self, "glare_fraction", "min_eye_contrast_ratio")
         _require_positive(

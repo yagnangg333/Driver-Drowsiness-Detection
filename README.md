@@ -51,10 +51,21 @@ flowchart LR
    - **Yawning:** the number of yawns in the last 60 seconds. A yawn is the mouth held wide open for at least 1.5 seconds.
    - **Head:** how long the head has been nodded forward by more than 15° or tilted sideways by more than 20°.
 5. **Conditions.** Every frame is checked for two conditions that make the eye cue unreliable:
-   - **Low light:** the mean brightness (0–255) of the face region. It is measured on the face, not the whole frame, so a bright window behind the driver does not hide a dark face.
-   - **Eye occlusion:** a frame counts as occluded if there is glare on the eye region (≥ 5% near-white pixels), the eye region is flat compared with the rest of the face (dark glasses, a hand), or the two eyes read very differently while the head faces ahead and at least one eye is clearly open (one eye hidden). Clear glasses alone do not count, and closing both eyes never counts as an occlusion.
+   - **Low light:** the mean brightness (0–255) of the **whole frame** is below 76. Cameras brighten dark scenes automatically, so at night the driver's face still looks normally lit (median 80 in real night footage), but the frame as a whole stays dark (median 52) because of the dark car and road.
+   - **Eye occlusion:** the eyes cannot be seen at all. A frame counts as occluded if there is glare on ≥ 15% of an eye region, the eye region is almost flat compared with the rest of the face (contrast ratio < 0.10: dark lenses, a hand), or the two eyes read very differently while the head faces ahead and at least one eye is clearly open (one eye hidden). Clear glasses do not count, closing both eyes never counts, and lightly tinted sunglasses are deliberately not flagged: the landmarks read the eyes through them as well as through clear glasses.
 
-   Both are smoothed over about 1 s with a time-based exponential moving average and have separate enter and exit thresholds (low light starts below 40 and ends above 50), so a passing shadow or reflection does not switch them.
+   Both are smoothed over about 1 s with a time-based exponential moving average and have separate enter and exit thresholds (low light starts below 76 and ends above 84), so a passing shadow or reflection does not switch them.
+
+   **How the thresholds were chosen.** The first thresholds came from artificially darkened or covered test photos and failed on real footage: low light never triggered at real night, and the occlusion check flagged up to 22% of frames with fully visible eyes. They were re-tuned on 15,319 frames from 482 real videos (NITYMED night driving, YawDD day driving with and without glasses or sunglasses, UTA-RLDD indoor webcams) with [`tools/condition_features.py`](tools/condition_features.py) and [`tools/tune_conditions.py`](tools/tune_conditions.py), choosing on half of the videos and checking on the other half. On the held-out half, and through the full pipeline:
+
+   | Footage | Read as low light | Read as eyes occluded |
+   |---|---|---|
+   | Night driving (NITYMED) | 100% | 0.7% |
+   | Day driving, no glasses (YawDD) | 0% | 0% |
+   | Day driving, sunglasses (YawDD) | 0% | 1.3% |
+   | Indoor webcam (UTA-RLDD) | 0% | 0% |
+
+   The occlusion check was tuned to flag at most 3% of single frames of uncovered eyes in every dataset, because a false occlusion lowers the eye weight for a driver whose eyes are perfectly visible.
 6. **Fusion.** The score is a weighted average of the three indicator scores. Two strategies share one interface and both run on every frame, so they are compared on identical inputs:
    - **Static** (baseline): fixed weights, eyes 0.5, yawning 0.2, head 0.3.
    - **Adaptive** (default): the weights depend on the conditions. Under normal conditions they equal the static weights, so any difference comes only from adapting.
@@ -147,6 +158,7 @@ src/drowsiness/
   cli.py           command-line interface
   dashboard.py     Streamlit dashboard
 tests/             unit tests + end-to-end tests on real frames
+tools/             threshold tuning on the evaluation datasets (needs data/)
 configs/           default configuration
 models/            MediaPipe face landmarker model
 assets/            alarm sound, reference images
