@@ -157,15 +157,114 @@ class IndicatorConfig:
 
 
 @dataclass(frozen=True)
+class ConditionConfig:
+    """Detection of conditions that make the eye cue unreliable (Phase 3)."""
+
+    # Low light. Cameras brighten dark scenes automatically, so the face itself
+    # rarely looks dark at night, but the frame as a whole does (the dark car,
+    # the road outside). Low light starts when the smoothed whole-frame
+    # brightness (0-255) falls below ``low_light_brightness`` and ends once it
+    # rises ``low_light_margin`` above it. Tuned on real night (NITYMED) vs day
+    # (YawDD, UTA-RLDD) footage with tools/tune_conditions.py.
+    low_light_brightness: float = 76.0
+    low_light_margin: float = 8.0
+    # Eye-region occlusion: the eyes cannot be seen at all. Each frame counts as
+    # "occluded" if any of these hold. Thresholds tuned on real footage
+    # (tools/tune_conditions.py) to flag at most 3% of frames of uncovered eyes
+    # in any dataset, day or night: a false occlusion would lower the eye weight
+    # for a driver whose eyes are perfectly visible. Lightly tinted sunglasses
+    # are deliberately not flagged; landmarks read the eyes through them as
+    # well as through clear glasses.
+    # glare: this fraction of eye-region pixels at or above ``glare_level``
+    glare_level: int = 245
+    glare_fraction: float = 0.15
+    # flat eye region (dark lenses, a hand): eye contrast below this fraction
+    # of the face's contrast
+    min_eye_contrast_ratio: float = 0.10
+    # one eye reads very differently from the other (|L - R| / max(L, R)),
+    # checked only while the head faces roughly forward and at least one eye is
+    # clearly open: with both eyes nearly shut the ratio of two tiny values is
+    # meaningless, and closing the eyes must never look like an occlusion.
+    max_ear_asymmetry: float = 0.5
+    asymmetry_max_yaw_deg: float = 25.0
+    asymmetry_min_open_ear: float = 0.20
+    # The share of recent frames that were occluded is smoothed over
+    # ``smoothing_s``; the condition starts above ``occlusion_enter`` and ends
+    # below ``occlusion_exit``.
+    occlusion_enter: float = 0.6
+    occlusion_exit: float = 0.3
+    smoothing_s: float = 1.0
+    # If true, a microsleep does not force an alarm on its own while the eyes are
+    # occluded (glare can make open eyes read as closed). Off by default: the eye
+    # weight under occlusion (0.2) is below the warning threshold, so with it on
+    # a real microsleep behind glare would raise no alert at all.
+    microsleep_needs_visible_eyes: bool = False
+
+    def __post_init__(self) -> None:
+        _require(
+            0 <= self.low_light_brightness <= 255,
+            "conditions.low_light_brightness must be in 0..255",
+        )
+        _require(self.low_light_margin >= 0, "conditions.low_light_margin must be >= 0")
+        _require(0 < self.glare_level <= 255, "conditions.glare_level must be in 1..255")
+        _require_fraction("conditions", self, "glare_fraction", "min_eye_contrast_ratio")
+        _require_positive(
+            "conditions",
+            self,
+            "max_ear_asymmetry",
+            "asymmetry_max_yaw_deg",
+            "asymmetry_min_open_ear",
+            "smoothing_s",
+        )
+        _require(
+            0 <= self.occlusion_exit < self.occlusion_enter <= 1,
+            "conditions: need 0 <= occlusion_exit < occlusion_enter <= 1",
+        )
+
+
+FUSION_STRATEGIES = ("adaptive", "static")
+
+
+def _check_weights(name: str, weights: tuple[float, float, float]) -> None:
+    if any(w < 0 for w in weights) or sum(weights) <= 0:
+        raise ConfigError(f"fusion {name} weights must be non-negative and not all zero")
+
+
+@dataclass(frozen=True)
 class FusionConfig:
+    # "adaptive" changes the weights with the detected conditions; "static"
+    # always uses the normal-condition weights (the baseline).
+    strategy: str = "adaptive"
+    # Normal conditions; also the static baseline.
     eye_weight: float = 0.5
     yawn_weight: float = 0.2
     head_weight: float = 0.3
+    # Low light: eye landmarks get noisy, so trust mouth and head more.
+    low_light_eye_weight: float = 0.2
+    low_light_yawn_weight: float = 0.35
+    low_light_head_weight: float = 0.45
+    # Eye region occluded (glare, dark glasses, hand).
+    occluded_eye_weight: float = 0.2
+    occluded_yawn_weight: float = 0.35
+    occluded_head_weight: float = 0.45
+    # Weights move to a new condition's values over this long instead of jumping.
+    transition_s: float = 1.0
 
     def __post_init__(self) -> None:
-        weights = (self.eye_weight, self.yawn_weight, self.head_weight)
-        if any(w < 0 for w in weights) or sum(weights) <= 0:
-            raise ConfigError("fusion weights must be non-negative and not all zero")
+        _require(
+            self.strategy in FUSION_STRATEGIES,
+            f"fusion.strategy must be one of {', '.join(FUSION_STRATEGIES)}",
+        )
+        _check_weights("normal", (self.eye_weight, self.yawn_weight, self.head_weight))
+        _check_weights(
+            "low_light",
+            (self.low_light_eye_weight, self.low_light_yawn_weight, self.low_light_head_weight),
+        )
+        _check_weights(
+            "occluded",
+            (self.occluded_eye_weight, self.occluded_yawn_weight, self.occluded_head_weight),
+        )
+        _require(self.transition_s >= 0, "fusion.transition_s must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -175,8 +274,9 @@ class AlertConfig:
     level3_threshold: float = 0.65
     hysteresis: float = 0.05
     escalate_after_s: float = 5.0
-    # Once raised, an alarm (or critical) sounds for at least this long, so it
-    # does not stutter on and off.
+    # Once raised, a level is kept for at least this long, so a warning does
+    # not flicker and an alarm does not stutter on and off.
+    level1_hold_s: float = 2.0
     level2_hold_s: float = 1.5
     level3_hold_s: float = 5.0
     # A microsleep (eyes closed for indicators.microsleep_s) always raises at
@@ -196,6 +296,7 @@ class AlertConfig:
             raise ConfigError("alert thresholds must satisfy 0 < level1 < level2 < level3 <= 1")
         _require(self.hysteresis >= 0, "alerts.hysteresis must be >= 0")
         _require_positive("alerts", self, "escalate_after_s", "no_face_warning_s")
+        _require(self.level1_hold_s >= 0, "alerts.level1_hold_s must be >= 0")
         _require(self.level2_hold_s >= 0, "alerts.level2_hold_s must be >= 0")
         _require(self.level3_hold_s >= 0, "alerts.level3_hold_s must be >= 0")
         _require(
@@ -214,6 +315,7 @@ class AppConfig:
     landmarker: LandmarkerConfig = field(default_factory=LandmarkerConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     indicators: IndicatorConfig = field(default_factory=IndicatorConfig)
+    conditions: ConditionConfig = field(default_factory=ConditionConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     alerts: AlertConfig = field(default_factory=AlertConfig)
 

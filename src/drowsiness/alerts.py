@@ -41,8 +41,9 @@ class AlertManager:
     - A level is entered when the score reaches its threshold and kept until
       the score falls ``hysteresis`` below it, which prevents flicker.
     - Staying at ALARM for ``escalate_after_s`` escalates to CRITICAL.
-    - ALARM is held for at least ``level2_hold_s`` and CRITICAL for at least
-      ``level3_hold_s`` after their cause clears, so the sound never stutters.
+    - WARNING, ALARM and CRITICAL are held for at least ``level1_hold_s``,
+      ``level2_hold_s`` and ``level3_hold_s`` after their cause clears, so
+      neither the warning nor the sound flickers on and off.
     - A microsleep raises at least ALARM, independent of the fusion weights.
     - Losing the face escalates WARNING -> ALARM -> CRITICAL over time, since
       a slumped head or blocked camera must not fail silently.
@@ -57,6 +58,7 @@ class AlertManager:
     def reset(self) -> None:
         self.level = AlertLevel.NONE
         self._alarm_since: float | None = None
+        self._warning_until = float("-inf")
         self._alarm_until = float("-inf")
         self._critical_until = float("-inf")
         self._no_face_since: float | None = None
@@ -81,6 +83,11 @@ class AlertManager:
                 )
         else:
             self._alarm_since = None
+
+        if level >= AlertLevel.WARNING:
+            self._warning_until = t + cfg.level1_hold_s
+        elif t < self._warning_until:
+            level, reason = AlertLevel.WARNING, "warning hold"
 
         if level >= AlertLevel.ALARM:
             self._alarm_until = t + cfg.level2_hold_s

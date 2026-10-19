@@ -34,3 +34,6 @@ Thumbs.db
 
 # Course documents (reports, slides) stay local
 Docs/
+
+# Evaluation datasets and recorded clips (large, third-party or personal data)
+data/
