@@ -274,8 +274,9 @@ class AlertConfig:
     level3_threshold: float = 0.65
     hysteresis: float = 0.05
     escalate_after_s: float = 5.0
-    # Once raised, an alarm (or critical) sounds for at least this long, so it
-    # does not stutter on and off.
+    # Once raised, a level is kept for at least this long, so a warning does
+    # not flicker and an alarm does not stutter on and off.
+    level1_hold_s: float = 2.0
     level2_hold_s: float = 1.5
     level3_hold_s: float = 5.0
     # A microsleep (eyes closed for indicators.microsleep_s) always raises at
@@ -295,6 +296,7 @@ class AlertConfig:
             raise ConfigError("alert thresholds must satisfy 0 < level1 < level2 < level3 <= 1")
         _require(self.hysteresis >= 0, "alerts.hysteresis must be >= 0")
         _require_positive("alerts", self, "escalate_after_s", "no_face_warning_s")
+        _require(self.level1_hold_s >= 0, "alerts.level1_hold_s must be >= 0")
         _require(self.level2_hold_s >= 0, "alerts.level2_hold_s must be >= 0")
         _require(self.level3_hold_s >= 0, "alerts.level3_hold_s must be >= 0")
         _require(

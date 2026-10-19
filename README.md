@@ -81,11 +81,11 @@ flowchart LR
 
    | Level | Trigger | Action |
    |---|---|---|
-   | 1 Warning | score ≥ 0.25, or face not visible for 3 s | on-screen warning |
-   | 2 Alarm | score ≥ 0.45, or a microsleep, or face not visible for 6 s | looping alarm sound |
+   | 1 Warning | score ≥ 0.25, or face not visible for 3 s | on-screen warning, held for at least 2 s |
+   | 2 Alarm | score ≥ 0.45, or a microsleep, or face not visible for 6 s | looping alarm sound, held for at least 1.5 s |
    | 3 Critical | score ≥ 0.65, or Level 2 held for 5 s, or face not visible for 10 s | full-volume alarm, held for at least 5 s |
 
-   A small margin (hysteresis) stops the level flickering near a threshold, and an alarm, once raised, sounds for at least 1.5 s so it never stutters. While the face is missing the level never goes down. Yawns and head tilts are debounced like eye closures (0.2 s), and a face dropout shorter than 0.3 s keeps every timer running; a longer one clears them, so time that was not observed is never counted as eyes closed. Every level change is written to `logs/alerts_<timestamp>.csv`. If that file can't be written (for example it's open in Excel), detection carries on and the missed rows are written later.
+   A small margin (hysteresis) stops the level flickering near a threshold. Once raised, a warning stays for at least 2 s and an alarm sounds for at least 1.5 s, so neither blinks on and off (on real night footage the median warning lasted 0.4 s before this hold, 2.1 s after); an alarm steps down through a warning before returning to normal. While the face is missing the level never goes down. Yawns and head tilts are debounced like eye closures (0.2 s), and a face dropout shorter than 0.3 s keeps every timer running; a longer one clears them, so time that was not observed is never counted as eyes closed. Every level change is written to `logs/alerts_<timestamp>.csv`. If that file can't be written (for example it's open in Excel), detection carries on and the missed rows are written later.
 
    **Failing loudly.** Losing the face escalates to an audible alarm, because a slumped head or a blocked camera is exactly when the driver can't be watched. If the camera stops delivering frames, the app retries for 2 s and reopens the device once. If the camera is still gone, or monitoring stops for any other reason after it started, the alarm sounds until you acknowledge it.
 

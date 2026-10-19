@@ -42,6 +42,7 @@ def test_int_accepted_for_float():
         ({"calibration": {"min_samples": 0}}, "min_samples must be > 0"),
         ({"calibration": {"duration_s": 0.0}}, "duration_s must be > 0"),
         ({"alerts": {"hysteresis": -1.0}}, "hysteresis"),
+        ({"alerts": {"level1_hold_s": -1.0}}, "level1_hold_s"),
         ({"alerts": {"no_face_alarm_s": 2.0}}, "no_face_warning_s < no_face_alarm_s"),
         ({"landmarker": {"max_faces": 0}}, "max_faces"),
         ({"landmarker": {"min_detection_confidence": 1.5}}, "between 0 and 1"),

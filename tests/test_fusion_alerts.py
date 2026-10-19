@@ -43,8 +43,25 @@ def test_levels_follow_score(manager):
 def test_hysteresis_prevents_flicker(manager):
     events, _ = run(manager, [0.30, 0.23, 0.27, 0.22, 0.26])
     assert [e.level for e in events] == [AlertLevel.WARNING]
-    events, _ = run(manager, [0.19], start=1.0)
+    # Clearly below: back to normal once the 2 s warning hold has passed.
+    events, _ = run(manager, [0.19] * 25, start=1.0)
     assert [e.level for e in events] == [AlertLevel.NONE]
+    assert events[0].timestamp >= 0.4 + 2.0  # last warning-level score at 0.4 s
+
+
+def test_warning_is_held_and_does_not_flicker(manager):
+    # A head-tilt score that ends abruptly (as tilt scores do): the warning
+    # must not blink on and off every half second.
+    events, t = run(manager, [0.30] * 3 + [0.0] * 5 + [0.30] * 3 + [0.0] * 15)
+    assert [e.level for e in events] == [AlertLevel.WARNING]
+    events, _ = run(manager, [0.0] * 10, start=t)
+    assert [e.level for e in events] == [AlertLevel.NONE]
+
+
+def test_alarm_steps_down_through_warning(manager):
+    events, _ = run(manager, [0.5] + [0.0] * 25)
+    assert [e.level for e in events] == [AlertLevel.ALARM, AlertLevel.WARNING, AlertLevel.NONE]
+    assert [e.reason for e in events[1:]] == ["warning hold", "score back to normal"]
 
 
 def test_sustained_alarm_escalates(manager):
@@ -88,7 +105,7 @@ def test_alarm_is_held_and_does_not_stutter(manager):
     events, t = run(manager, [0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.0])
     assert [e.level for e in events] == [AlertLevel.ALARM]
     run(manager, [0.0] * 14, start=t)  # last alarm at 0.4 s, so the hold ends at 1.9 s
-    assert manager.level == AlertLevel.NONE
+    assert manager.level == AlertLevel.WARNING  # stepping down, held until 2.4 s
 
 
 def test_alarm_hold_ends_after_cause_clears(manager):
@@ -96,6 +113,8 @@ def test_alarm_hold_ends_after_cause_clears(manager):
     run(manager, [0.0] * 14, start=t)  # 1.4 s < 1.5 s hold
     assert manager.level == AlertLevel.ALARM
     run(manager, [0.0] * 3, start=t + 1.4)
+    assert manager.level == AlertLevel.WARNING
+    run(manager, [0.0] * 5, start=t + 1.7)  # past the 2 s warning hold
     assert manager.level == AlertLevel.NONE
 
 
@@ -129,12 +148,12 @@ def test_microsleep_floor_can_be_disabled():
 
 def test_event_log_writes_csv(tmp_path, manager):
     log = EventLog(tmp_path)
-    # Warning, alarm, then back to normal once the 1.5 s alarm hold has passed.
-    for event in run(manager, [0.3, 0.5] + [0.0] * 20)[0]:
+    # Warning, alarm, back down through a warning, then normal.
+    for event in run(manager, [0.3, 0.5] + [0.0] * 25)[0]:
         log.record(event)
     lines = log.path.read_text(encoding="utf-8").splitlines()
     assert lines[0].startswith("wall_time,session_time_s")
-    assert len(lines) == 1 + len(log.events) == 4
+    assert len(lines) == 1 + len(log.events) == 5
 
 
 def test_event_log_survives_unwritable_file_and_retries(tmp_path, manager):

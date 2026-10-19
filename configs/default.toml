@@ -94,6 +94,7 @@ level2_threshold = 0.45             # audio alarm
 level3_threshold = 0.65             # critical, persistent
 hysteresis = 0.05
 escalate_after_s = 5.0              # alarm held this long escalates to critical
+level1_hold_s = 2.0                 # a warning stays at least this long (no flicker)
 level2_hold_s = 1.5                 # an alarm sounds at least this long (no stutter)
 level3_hold_s = 5.0
 microsleep_alarm = true             # a microsleep always raises at least level 2
