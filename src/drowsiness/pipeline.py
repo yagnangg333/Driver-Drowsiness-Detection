@@ -145,6 +145,14 @@ class DrowsinessPipeline:
         self._calibrator = Calibrator(
             self.config.calibration, self.config.indicators.default_ear_threshold
         )
+        self.reset_tracking()
+
+    def reset_tracking(self) -> None:
+        """Clear all temporal state but keep the calibration.
+
+        For a new recording of the same driver: nothing from the previous one
+        (an eye closure, a yawn count, an alert) carries over.
+        """
         for indicator in (self._eye, self._yawn, self._head):
             indicator.reset()
         for fusion in (self._static, self._adaptive, self.fusion):
