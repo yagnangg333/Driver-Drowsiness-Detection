@@ -3,7 +3,7 @@ import pytest
 from drowsiness.alerts import AlertLevel, AlertManager, EventLog
 from drowsiness.conditions import NORMAL, Conditions
 from drowsiness.config import AlertConfig, FusionConfig
-from drowsiness.fusion import AdaptiveFusion, IndicatorScores, StaticFusion, make_fusion
+from drowsiness.fusion import AdaptiveFusion, IndicatorScores, StaticFusion
 
 
 def test_static_fusion_normalizes_weights():
@@ -201,11 +201,3 @@ def test_adaptive_weights_change_gradually():
     assert fusion.fuse(scores, LOW_LIGHT, 1.2).weights.eye == pytest.approx(0.2)
     fusion.reset()
     assert fusion.fuse(scores, LOW_LIGHT, 2.0).weights.eye == pytest.approx(0.2)
-
-
-def test_make_fusion():
-    assert make_fusion(FusionConfig()).name == "adaptive"
-    assert make_fusion(FusionConfig(strategy="static")).name == "static"
-    assert make_fusion(FusionConfig(), "static").name == "static"
-    with pytest.raises(ValueError):
-        make_fusion(FusionConfig(), "magic")

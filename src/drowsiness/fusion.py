@@ -135,13 +135,3 @@ class AdaptiveFusion:
             )
         self._last_t = t
         return FusionResult(_weighted(self._current, scores), self._current)
-
-
-def make_fusion(config: FusionConfig, strategy: str | None = None) -> FusionStrategy:
-    """Build the fusion strategy named in the config (or ``strategy``)."""
-    strategy = strategy or config.strategy
-    if strategy == "adaptive":
-        return AdaptiveFusion(config)
-    if strategy == "static":
-        return StaticFusion(config)
-    raise ValueError(f"unknown fusion strategy: {strategy}")

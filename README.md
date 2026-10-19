@@ -150,7 +150,6 @@ tests/             unit tests + end-to-end tests on real frames
 configs/           default configuration
 models/            MediaPipe face landmarker model
 assets/            alarm sound, reference images
-Docs/              reports and presentations (kept locally, not in git)
 ```
 
 ## Development
