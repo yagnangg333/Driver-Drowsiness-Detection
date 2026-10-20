@@ -125,6 +125,17 @@ Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same r
 - The yawn rule (MAR > 0.45 for 1.0 s instead of 0.5 for 1.5 s) was chosen on half of the YawDD drivers: yawns caught on the other half 56% → 69%, with one false yawn in about 50 talking clips; on NITYMED, 1.76 → 2.34 of 3 yawns per video.
 - Rejected because they did not hold on unseen subjects: other eye-closure thresholds, a shorter or warm-up PERCLOS window, longer microsleep time, ignoring closures while the mouth stretches, letting the eye score alone raise alarms ("peak fusion", which raised false warnings on awake drivers from 23% to 41% of clips) and counting backward head tilts.
 
+**Learned fusion (tried, not adopted).** We also trained a logistic regression on 13 windowed features (eye-closure fractions, closure length, blinks, relative EAR, yawn and head scores, mouth opening, nodding, smile, conditions) instead of hand-set weights ([`learned.py`](src/drowsiness/learned.py), [`tools/learned_fusion.py`](tools/learned_fusion.py), [`tools/learned_variants.py`](tools/learned_variants.py)). Every subject was predicted by a model that never saw them. No variant beat the rule-based adaptive fusion overall:
+
+| Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed |
+|---|---|---|---|---|---|
+| **Rule-based adaptive (used)** | **80.9%** | **23.0%** | 0.861 | 8.8% | **94.7%** |
+| Learned on NTHU-DDD, all features | 76.9% | 27.7% | 0.458 | 2.9% | 84.2% |
+| Learned on NTHU-DDD, without smile and conditions | 72.4% | 29.6% | **0.917** | 4.4% | 84.2% |
+| Learned on NTHU-DDD + UTA-RLDD, all features | 77.5% | 30.1% | 0.604 | 5.4% | 100% |
+
+With four acted subjects the model learned the training set's habits (its largest weight said "smiling means alert") and did not transfer to real tiredness; each variant won on one dataset and lost on others. The safety rules (microsleep and face loss) stay in the alert manager in every variant.
+
 **Limitations of the evaluation.** NTHU-DDD (Kaggle copy) has four subjects and acted drowsiness; UTA-RLDD and NITYMED have only per-video labels; no public dataset has dark sunglasses or hands over the eyes with drowsiness labels, so those cases are tested only with simulated frames. Processing times in the tables are with six recordings processed in parallel; live, the pipeline needs about 10–15 ms per frame.
 
 ## Setup
@@ -180,6 +191,7 @@ src/drowsiness/
   indicators.py    closed-eye ratio/microsleep, yawn, head-tilt scores
   conditions.py    low-light and eye-occlusion detection
   fusion.py        StaticFusion baseline + AdaptiveFusion
+  learned.py       learned fusion (evaluated, not used live)
   alerts.py        3-level alert state machine + CSV event log
   audio.py         alarm sound (pygame)
   pipeline.py      per-frame orchestration -> FrameReport
@@ -189,7 +201,7 @@ src/drowsiness/
   cli.py           command-line interface
   dashboard.py     Streamlit dashboard
 tests/             unit tests + end-to-end tests on real frames
-tools/             evaluation, offline replay and tuning on the datasets (needs data/)
+tools/             evaluation, offline replay, tuning and learned fusion (needs data/)
 configs/           default configuration
 models/            MediaPipe face landmarker model
 assets/            alarm sound, reference images
