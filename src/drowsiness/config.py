@@ -113,9 +113,11 @@ class IndicatorConfig:
     # A closure only ends once the eyes stay open this long, so a single
     # noisy frame does not reset the microsleep timer.
     closure_debounce_s: float = 0.15
-    # Yawning
-    yawn_mar_threshold: float = 0.5
-    yawn_min_duration_s: float = 1.5
+    # Yawning. Tuned on YawDD (chosen on half of the drivers, checked on the
+    # other half): yawns caught in yawning clips 56% -> 69% with 1 false yawn
+    # in ~50 talking clips; on NITYMED night videos 1.76 -> 2.34 of 3 yawns.
+    yawn_mar_threshold: float = 0.45
+    yawn_min_duration_s: float = 1.0
     yawn_window_s: float = 60.0
     yawns_for_max: int = 3
     # A yawn in progress only ends once MAR stays below the threshold this long.
@@ -179,8 +181,9 @@ class ConditionConfig:
     glare_level: int = 245
     glare_fraction: float = 0.15
     # flat eye region (dark lenses, a hand): eye contrast below this fraction
-    # of the face's contrast
-    min_eye_contrast_ratio: float = 0.10
+    # of the face's contrast. Covered eyes measure ~0.00; 0.10 still flagged
+    # 2.5% of night frames of drivers whose eyes merely look flat, 0.05 none.
+    min_eye_contrast_ratio: float = 0.05
     # one eye reads very differently from the other (|L - R| / max(L, R)),
     # checked only while the head faces roughly forward and at least one eye is
     # clearly open: with both eyes nearly shut the ratio of two tiny values is
@@ -194,6 +197,20 @@ class ConditionConfig:
     occlusion_enter: float = 0.6
     occlusion_exit: float = 0.3
     smoothing_s: float = 1.0
+    # Expression: smiling and laughing narrow the eyes without drowsiness; on
+    # NTHU-DDD they caused most false eye closures. While MediaPipe's smile
+    # score (mean of mouthSmileLeft/Right) averaged over ``smile_window_s``
+    # exceeds ``smile_threshold``, the adaptive strategy does not count eye
+    # closures. Real drowsy closures had smile <= 0.003 (90th percentile).
+    smile_threshold: float = 0.10
+    smile_window_s: float = 1.0
+    # A yawn stretches the mouth and MediaPipe reads part of it as a smile
+    # (36-54% of wide-open-mouth frames on NITYMED and YawDD), which hid the
+    # eye closures that come with yawning. So a smile does not count while the
+    # mouth has been wide open (MAR above ``smile_max_mar``, the yawn
+    # threshold) within the last ``smile_yawn_guard_s``.
+    smile_max_mar: float = 0.45
+    smile_yawn_guard_s: float = 2.0
     # If true, a microsleep does not force an alarm on its own while the eyes are
     # occluded (glare can make open eyes read as closed). Off by default: the eye
     # weight under occlusion (0.2) is below the warning threshold, so with it on
@@ -215,6 +232,10 @@ class ConditionConfig:
             "asymmetry_max_yaw_deg",
             "asymmetry_min_open_ear",
             "smoothing_s",
+        )
+        _require_fraction("conditions", self, "smile_threshold")
+        _require_positive(
+            "conditions", self, "smile_window_s", "smile_max_mar", "smile_yawn_guard_s"
         )
         _require(
             0 <= self.occlusion_exit < self.occlusion_enter <= 1,
@@ -239,10 +260,14 @@ class FusionConfig:
     eye_weight: float = 0.5
     yawn_weight: float = 0.2
     head_weight: float = 0.3
-    # Low light: eye landmarks get noisy, so trust mouth and head more.
-    low_light_eye_weight: float = 0.2
-    low_light_yawn_weight: float = 0.35
-    low_light_head_weight: float = 0.45
+    # Low light: the same as normal. On real night driving (NITYMED) the eye
+    # measurements were as precise as by day (EAR noise 0.8% vs 0.7%) and eye
+    # closures read at night were real, so lowering the eye weight there only
+    # discarded good evidence (night microsleep videos with an alarm: 94.7%
+    # static vs 84.2% with eye weight 0.2). Low light is still detected and shown.
+    low_light_eye_weight: float = 0.5
+    low_light_yawn_weight: float = 0.2
+    low_light_head_weight: float = 0.3
     # Eye region occluded (glare, dark glasses, hand).
     occluded_eye_weight: float = 0.2
     occluded_yawn_weight: float = 0.35

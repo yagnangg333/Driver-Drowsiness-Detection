@@ -1,3 +1,5 @@
+import dataclasses
+
 import cv2
 import numpy as np
 import pytest
@@ -54,10 +56,10 @@ def detector():
     [
         (CLEAR, ()),
         (GLARE, ("glare",)),
-        (fc(contrast=0.05), ("eyes covered",)),  # below the absolute floor
+        (fc(contrast=0.02), ("eyes covered",)),  # below the absolute floor
         (fc(asymmetry=0.8), ("one eye hidden",)),
         (fc(asymmetry=None), ()),  # head turned: asymmetry not checked
-        (fc(glare=0.3, contrast=0.05), ("glare", "eyes covered")),
+        (fc(glare=0.3, contrast=0.02), ("glare", "eyes covered")),
     ],
 )
 def test_occlusion_reasons(frame, reasons):
@@ -189,3 +191,28 @@ def test_measure_on_real_face(awake_frame, kind, dark, occluded):
 def test_ear_asymmetry(left, right, yaw, expected):
     signals = FaceSignals(left, right, 0.1, HeadPose(0.0, yaw, 0.0))
     assert ear_asymmetry(signals, ConditionConfig()) == expected
+
+
+def test_smiling_follows_the_recent_smile_score(detector):
+    smile = dataclasses.replace(CLEAR, smile=0.6)
+    state, t = _feed(detector, CLEAR, 2.0, 0.0)
+    assert not state.smiling and state.label == "normal"
+    state, t = _feed(detector, smile, 1.0, t)
+    assert state.smiling and state.label == "smiling"
+    assert state.normal  # smiling does not change the fusion weights
+    state, _ = _feed(detector, CLEAR, 1.2, t)
+    assert not state.smiling
+
+
+def test_a_yawn_is_not_a_smile(detector):
+    # MediaPipe partly scores a yawn's stretched mouth as a smile.
+    yawn = dataclasses.replace(CLEAR, smile=0.6, mar=0.7)
+    state, t = _feed(detector, yawn, 1.5, 0.0)
+    assert not state.smiling
+    # Still not a smile just after the yawn, while the smile score lingers...
+    after = dataclasses.replace(CLEAR, smile=0.6, mar=0.1)
+    state, t = _feed(detector, after, 1.0, t)
+    assert not state.smiling
+    # ...but a real smile once the mouth has been closed for a while.
+    state, _ = _feed(detector, after, 2.0, t)
+    assert state.smiling

@@ -8,6 +8,9 @@ Two conditions are tracked:
 - **Eye occlusion**: the eye region cannot be seen properly, because of glare on
   glasses, dark glasses or a hand. Clear glasses alone do not count.
 
+A third condition, **smiling**, is read from MediaPipe's expression scores:
+smiles and laughter narrow the eyes without drowsiness.
+
 Each frame is measured from the image and the landmarks, the measurements are
 smoothed over time with an exponential moving average, and each condition has
 separate enter and exit thresholds so it does not flicker. The result tells the
@@ -17,6 +20,7 @@ adaptive fusion which cues to trust.
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass
 
 import cv2
@@ -44,6 +48,8 @@ class FrameConditions:
     eye_contrast_ratio: float  # eye-region contrast / face contrast
     # |L - R| / max(L, R); None when not checked (head turned or both eyes shut)
     ear_asymmetry: float | None
+    smile: float = 0.0  # MediaPipe smile score, mean of left and right, 0-1
+    mar: float = 0.0  # mouth aspect ratio, to tell a yawn from a smile
 
     def occlusion_reasons(self, config: ConditionConfig) -> tuple[str, ...]:
         """Why the eyes look occluded in this frame (empty if they do not)."""
@@ -66,6 +72,8 @@ class Conditions:
     brightness: float | None = None  # smoothed whole-frame brightness
     occlusion: float = 0.0  # smoothed share of recent frames that were occluded
     reasons: tuple[str, ...] = ()  # why the eyes count as occluded
+    smiling: bool = False
+    smile: float = 0.0  # smile score averaged over the recent window
 
     @property
     def normal(self) -> bool:
@@ -78,6 +86,8 @@ class Conditions:
             parts.append("low light")
         if self.eye_occluded:
             parts.append("eyes occluded")
+        if self.smiling:
+            parts.append("smiling")
         return ", ".join(parts) or "normal"
 
 
@@ -111,12 +121,16 @@ def measure(
     # Every 4th pixel is plenty for an average and keeps this cheap.
     small = np.ascontiguousarray(frame_bgr[::4, ::4])
     frame_brightness = float(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).mean())
+    shapes = face.blendshapes
+    smile = (shapes.get("mouthSmileLeft", 0.0) + shapes.get("mouthSmileRight", 0.0)) / 2.0
     return FrameConditions(
         face_brightness,
         frame_brightness,
         glare_fraction,
         ratio,
         ear_asymmetry(signals, config),
+        smile,
+        signals.mar,
     )
 
 
@@ -157,6 +171,8 @@ class ConditionDetector:
         self._last_t: float | None = None
         self._brightness: float | None = None
         self._occlusion = 0.0
+        self._smiles: deque[tuple[float, float]] = deque()
+        self._mouth_wide_at: float | None = None
         self.state = NORMAL
 
     def update(self, t: float, frame: FrameConditions | None) -> Conditions:
@@ -188,6 +204,19 @@ class ConditionDetector:
         elif not occluded and self._occlusion > cfg.occlusion_enter:
             occluded = True
 
+        # Smiling: plain mean over the last window, so it follows the face quickly
+        # in both directions (a smile starts and ends within a second).
+        self._smiles.append((t, frame.smile))
+        while self._smiles and t - self._smiles[0][0] > cfg.smile_window_s:
+            self._smiles.popleft()
+        smile = sum(s for _, s in self._smiles) / len(self._smiles)
+        # A wide-open mouth is a yawn, not a smile, even if MediaPipe scores it so.
+        if frame.mar > cfg.smile_max_mar:
+            self._mouth_wide_at = t
+        yawning = (
+            self._mouth_wide_at is not None and t - self._mouth_wide_at <= cfg.smile_yawn_guard_s
+        )
+
         # Keep showing the last reason while the condition holds through a
         # frame that happened to look clean.
         if occluded and not reasons:
@@ -198,5 +227,7 @@ class ConditionDetector:
             brightness=self._brightness,
             occlusion=self._occlusion,
             reasons=reasons if occluded else (),
+            smiling=smile > cfg.smile_threshold and not yawning,
+            smile=smile,
         )
         return self.state

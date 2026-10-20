@@ -37,8 +37,8 @@ perclos_window_s = 20.0
 perclos_max = 0.4                   # PERCLOS mapped to an eye score of 1
 microsleep_s = 1.5                  # continuous closure mapped to an eye score of 1
 closure_debounce_s = 0.15           # eyes must stay open this long to end a closure
-yawn_mar_threshold = 0.5
-yawn_min_duration_s = 1.5
+yawn_mar_threshold = 0.45          # tuned on YawDD (tools/tune_detection.py)
+yawn_min_duration_s = 1.0
 yawn_window_s = 60.0
 yawns_for_max = 3                   # yawns within the window for a yawn score of 1
 yawn_debounce_s = 0.20              # mouth must close this long to end a yawn
@@ -60,13 +60,17 @@ low_light_margin = 8.0              # ...until it is this far above it again
 # dataset; lightly tinted sunglasses are deliberately not flagged.
 glare_level = 245                   # grey level counted as glare
 glare_fraction = 0.15               # glare on this share of an eye region
-min_eye_contrast_ratio = 0.10       # eye region this flat vs the face: covered
+min_eye_contrast_ratio = 0.05       # eye region this flat vs the face: covered
 max_ear_asymmetry = 0.5             # one eye reads this differently: one eye hidden
 asymmetry_max_yaw_deg = 25.0        # (asymmetry checked only when facing ahead...
 asymmetry_min_open_ear = 0.20       # ...and at least one eye is clearly open)
 occlusion_enter = 0.6               # share of recent frames occluded to start...
 occlusion_exit = 0.3                # ...and to end the condition
 smoothing_s = 1.0                   # time constant of the moving averages
+smile_threshold = 0.10              # MediaPipe smile score (1 s mean) above this:
+smile_window_s = 1.0                # eye closures are not counted (adaptive only)...
+smile_max_mar = 0.45                # ...unless the mouth was this wide open (a yawn,
+smile_yawn_guard_s = 2.0            # which MediaPipe partly reads as a smile) lately
 microsleep_needs_visible_eyes = false  # true: with eyes occluded a microsleep no
                                        # longer forces an alarm on its own (fewer
                                        # glare false alarms, but a real microsleep
@@ -78,10 +82,11 @@ strategy = "adaptive"               # "adaptive" or "static" (fixed weights, bas
 eye_weight = 0.5
 yawn_weight = 0.2
 head_weight = 0.3
-# Low light: the eye cue gets noisy, so trust mouth and head more
-low_light_eye_weight = 0.2
-low_light_yawn_weight = 0.35
-low_light_head_weight = 0.45
+# Low light: same as normal. On real night footage the eye cue was as precise
+# as by day, so lowering its weight only discarded real eye closures.
+low_light_eye_weight = 0.5
+low_light_yawn_weight = 0.2
+low_light_head_weight = 0.3
 # Eye region occluded (glare, dark glasses, hand)
 occluded_eye_weight = 0.2
 occluded_yawn_weight = 0.35

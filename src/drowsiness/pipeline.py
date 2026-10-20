@@ -32,6 +32,19 @@ from drowsiness.indicators import (
 from drowsiness.landmarks import FaceLandmarker, FaceObservation
 from drowsiness.signals import FaceSignals, compute_signals
 
+# Blendshapes recorded per frame for evaluating expressions (smiling, talking,
+# laughing) that narrow the eyes without drowsiness.
+_EXPRESSION_SHAPES = (
+    "eyeBlink",
+    "eyeSquint",
+    "cheekSquint",
+    "mouthSmile",
+    "jawOpen",
+    "mouthStretch",
+    "noseSneer",
+    "browDown",
+)
+
 
 @dataclass(frozen=True)
 class FrameReport:
@@ -42,7 +55,7 @@ class FrameReport:
     calibration_progress: float
     calibration_note: str | None
     baseline: Baseline | None
-    eye: EyeState
+    eye: EyeState  # as seen by the strategy that drives the alerts
     yawn: YawnState
     head: HeadState
     conditions: Conditions
@@ -52,6 +65,10 @@ class FrameReport:
     adaptive_score: float
     alert_level: AlertLevel
     event: AlertEvent | None
+    # The eye cue of each strategy: static counts every closure, adaptive
+    # ignores closures while the driver smiles.
+    eye_static: EyeState
+    eye_adaptive: EyeState
 
     @property
     def face_detected(self) -> bool:
@@ -60,6 +77,16 @@ class FrameReport:
     @property
     def scores(self) -> IndicatorScores:
         return IndicatorScores(self.eye.score, self.yawn.score, self.head.score)
+
+    def _expression_columns(self) -> dict[str, float]:
+        """MediaPipe expression scores (0-1) that can narrow or hide the eyes,
+        averaged over left and right; NaN without a face."""
+        shapes = self.face.blendshapes if self.face else {}
+        out = {}
+        for name in _EXPRESSION_SHAPES:
+            sides = [shapes[k] for k in (name + "Left", name + "Right", name) if k in shapes]
+            out[f"bs_{name}"] = sum(sides) / len(sides) if sides else float("nan")
+        return out
 
     def to_row(self) -> dict[str, Any]:
         """Flat per-frame record, used for recordings and offline evaluation."""
@@ -92,6 +119,13 @@ class FrameReport:
             "head_weight": w.head,
             "static_score": self.static_score,
             "adaptive_score": self.adaptive_score,
+            "smile": c.smile,
+            "smiling": int(c.smiling),
+            "eye_score_static": self.eye_static.score,
+            "eye_score_adaptive": self.eye_adaptive.score,
+            "microsleep_static": int(self.eye_static.microsleep),
+            "microsleep_adaptive": int(self.eye_adaptive.microsleep),
+            **self._expression_columns(),
             "fusion": self.fusion_name,
             "fused_score": self.fusion.score,
             "alert_level": int(self.alert_level),
@@ -117,9 +151,9 @@ class DrowsinessPipeline:
         self._conditions = ConditionDetector(config.conditions)
 
         ind = config.indicators
-        self._eye = EyeClosureIndicator(
-            ind.perclos_window_s, ind.perclos_max, ind.microsleep_s, ind.closure_debounce_s
-        )
+        eye_args = (ind.perclos_window_s, ind.perclos_max, ind.microsleep_s, ind.closure_debounce_s)
+        self._eye_static = EyeClosureIndicator(*eye_args)  # counts every closure
+        self._eye_adaptive = EyeClosureIndicator(*eye_args)  # not while smiling
         self._yawn = YawnIndicator(
             ind.yawn_mar_threshold,
             ind.yawn_min_duration_s,
@@ -145,7 +179,15 @@ class DrowsinessPipeline:
         self._calibrator = Calibrator(
             self.config.calibration, self.config.indicators.default_ear_threshold
         )
-        for indicator in (self._eye, self._yawn, self._head):
+        self.reset_tracking()
+
+    def reset_tracking(self) -> None:
+        """Clear all temporal state but keep the calibration.
+
+        For a new recording of the same driver: nothing from the previous one
+        (an eye closure, a yawn count, an alert) carries over.
+        """
+        for indicator in self._indicators:
             indicator.reset()
         for fusion in (self._static, self._adaptive, self.fusion):
             fusion.reset()
@@ -168,25 +210,29 @@ class DrowsinessPipeline:
             self._calibrator.update(timestamp, signals)
         elif signals is not None:
             self._face_missing_since = None
-            self._update_indicators(timestamp, signals, self._calibrator.result)
+            self._update_indicators(timestamp, signals, self._calibrator.result, conditions)
         else:
             self._handle_missing_face(timestamp)
 
-        scores = IndicatorScores(
-            self._eye.state.score, self._yawn.state.score, self._head.state.score
+        yawn, head = self._yawn.state.score, self._head.state.score
+        static = self._static.fuse(
+            IndicatorScores(self._eye_static.state.score, yawn, head), conditions, timestamp
         )
-        static = self._static.fuse(scores, conditions, timestamp)
-        adaptive = self._adaptive.fuse(scores, conditions, timestamp)
-        if self.fusion is self._adaptive:
-            fusion = adaptive
-        elif self.fusion is self._static:
-            fusion = static
+        adaptive_scores = IndicatorScores(self._eye_adaptive.state.score, yawn, head)
+        adaptive = self._adaptive.fuse(adaptive_scores, conditions, timestamp)
+        if self.fusion is self._static:
+            fusion, eye = static, self._eye_static.state
         else:
-            fusion = self.fusion.fuse(scores, conditions, timestamp)
+            eye = self._eye_adaptive.state
+            fusion = (
+                adaptive
+                if self.fusion is self._adaptive
+                else self.fusion.fuse(adaptive_scores, conditions, timestamp)
+            )
 
         # Optionally, a microsleep behind an occlusion does not force an alarm on
         # its own (off by default: see ConditionConfig).
-        microsleep = self._eye.state.microsleep and not (
+        microsleep = eye.microsleep and not (
             conditions.eye_occluded and self.config.conditions.microsleep_needs_visible_eyes
         )
         event = None
@@ -201,7 +247,7 @@ class DrowsinessPipeline:
             calibration_progress=self._calibrator.progress,
             calibration_note=self._calibrator.note,
             baseline=self._calibrator.result,
-            eye=self._eye.state,
+            eye=eye,
             yawn=self._yawn.state,
             head=self._head.state,
             conditions=conditions,
@@ -211,7 +257,13 @@ class DrowsinessPipeline:
             adaptive_score=adaptive.score,
             alert_level=self.alerts.level,
             event=event,
+            eye_static=self._eye_static.state,
+            eye_adaptive=self._eye_adaptive.state,
         )
+
+    @property
+    def _indicators(self) -> tuple:
+        return (self._eye_static, self._eye_adaptive, self._yawn, self._head)
 
     def _handle_missing_face(self, t: float) -> None:
         # A short dropout (one or two lost frames) keeps every timer running, so
@@ -222,11 +274,16 @@ class DrowsinessPipeline:
         if self._face_missing_since is None:
             self._face_missing_since = t
         if t - self._face_missing_since >= self.config.indicators.face_loss_grace_s:
-            for indicator in (self._eye, self._yawn, self._head):
+            for indicator in self._indicators:
                 indicator.face_lost(t)
 
-    def _update_indicators(self, t: float, signals: FaceSignals, baseline: Baseline) -> None:
-        self._eye.update(t, signals.ear < baseline.ear_threshold)
+    def _update_indicators(
+        self, t: float, signals: FaceSignals, baseline: Baseline, conditions: Conditions
+    ) -> None:
+        closed = signals.ear < baseline.ear_threshold
+        self._eye_static.update(t, closed)
+        # A smile narrows the eyes without drowsiness: not an eye closure.
+        self._eye_adaptive.update(t, closed and not conditions.smiling)
         self._yawn.update(t, signals.mar)
         if signals.pose is not None:
             self._head.update(
