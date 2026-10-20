@@ -49,6 +49,7 @@ class FrameConditions:
     # |L - R| / max(L, R); None when not checked (head turned or both eyes shut)
     ear_asymmetry: float | None
     smile: float = 0.0  # MediaPipe smile score, mean of left and right, 0-1
+    mar: float = 0.0  # mouth aspect ratio, to tell a yawn from a smile
 
     def occlusion_reasons(self, config: ConditionConfig) -> tuple[str, ...]:
         """Why the eyes look occluded in this frame (empty if they do not)."""
@@ -129,6 +130,7 @@ def measure(
         ratio,
         ear_asymmetry(signals, config),
         smile,
+        signals.mar,
     )
 
 
@@ -170,6 +172,7 @@ class ConditionDetector:
         self._brightness: float | None = None
         self._occlusion = 0.0
         self._smiles: deque[tuple[float, float]] = deque()
+        self._mouth_wide_at: float | None = None
         self.state = NORMAL
 
     def update(self, t: float, frame: FrameConditions | None) -> Conditions:
@@ -207,6 +210,12 @@ class ConditionDetector:
         while self._smiles and t - self._smiles[0][0] > cfg.smile_window_s:
             self._smiles.popleft()
         smile = sum(s for _, s in self._smiles) / len(self._smiles)
+        # A wide-open mouth is a yawn, not a smile, even if MediaPipe scores it so.
+        if frame.mar > cfg.smile_max_mar:
+            self._mouth_wide_at = t
+        yawning = (
+            self._mouth_wide_at is not None and t - self._mouth_wide_at <= cfg.smile_yawn_guard_s
+        )
 
         # Keep showing the last reason while the condition holds through a
         # frame that happened to look clean.
@@ -218,7 +227,7 @@ class ConditionDetector:
             brightness=self._brightness,
             occlusion=self._occlusion,
             reasons=reasons if occluded else (),
-            smiling=smile > cfg.smile_threshold,
+            smiling=smile > cfg.smile_threshold and not yawning,
             smile=smile,
         )
         return self.state

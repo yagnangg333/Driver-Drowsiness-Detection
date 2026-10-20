@@ -181,8 +181,9 @@ class ConditionConfig:
     glare_level: int = 245
     glare_fraction: float = 0.15
     # flat eye region (dark lenses, a hand): eye contrast below this fraction
-    # of the face's contrast
-    min_eye_contrast_ratio: float = 0.10
+    # of the face's contrast. Covered eyes measure ~0.00; 0.10 still flagged
+    # 2.5% of night frames of drivers whose eyes merely look flat, 0.05 none.
+    min_eye_contrast_ratio: float = 0.05
     # one eye reads very differently from the other (|L - R| / max(L, R)),
     # checked only while the head faces roughly forward and at least one eye is
     # clearly open: with both eyes nearly shut the ratio of two tiny values is
@@ -203,6 +204,13 @@ class ConditionConfig:
     # closures. Real drowsy closures had smile <= 0.003 (90th percentile).
     smile_threshold: float = 0.10
     smile_window_s: float = 1.0
+    # A yawn stretches the mouth and MediaPipe reads part of it as a smile
+    # (36-54% of wide-open-mouth frames on NITYMED and YawDD), which hid the
+    # eye closures that come with yawning. So a smile does not count while the
+    # mouth has been wide open (MAR above ``smile_max_mar``, the yawn
+    # threshold) within the last ``smile_yawn_guard_s``.
+    smile_max_mar: float = 0.45
+    smile_yawn_guard_s: float = 2.0
     # If true, a microsleep does not force an alarm on its own while the eyes are
     # occluded (glare can make open eyes read as closed). Off by default: the eye
     # weight under occlusion (0.2) is below the warning threshold, so with it on
@@ -226,7 +234,9 @@ class ConditionConfig:
             "smoothing_s",
         )
         _require_fraction("conditions", self, "smile_threshold")
-        _require_positive("conditions", self, "smile_window_s")
+        _require_positive(
+            "conditions", self, "smile_window_s", "smile_max_mar", "smile_yawn_guard_s"
+        )
         _require(
             0 <= self.occlusion_exit < self.occlusion_enter <= 1,
             "conditions: need 0 <= occlusion_exit < occlusion_enter <= 1",

@@ -60,7 +60,7 @@ low_light_margin = 8.0              # ...until it is this far above it again
 # dataset; lightly tinted sunglasses are deliberately not flagged.
 glare_level = 245                   # grey level counted as glare
 glare_fraction = 0.15               # glare on this share of an eye region
-min_eye_contrast_ratio = 0.10       # eye region this flat vs the face: covered
+min_eye_contrast_ratio = 0.05       # eye region this flat vs the face: covered
 max_ear_asymmetry = 0.5             # one eye reads this differently: one eye hidden
 asymmetry_max_yaw_deg = 25.0        # (asymmetry checked only when facing ahead...
 asymmetry_min_open_ear = 0.20       # ...and at least one eye is clearly open)
@@ -68,7 +68,9 @@ occlusion_enter = 0.6               # share of recent frames occluded to start..
 occlusion_exit = 0.3                # ...and to end the condition
 smoothing_s = 1.0                   # time constant of the moving averages
 smile_threshold = 0.10              # MediaPipe smile score (1 s mean) above this:
-smile_window_s = 1.0                # eye closures are not counted (adaptive only)
+smile_window_s = 1.0                # eye closures are not counted (adaptive only)...
+smile_max_mar = 0.45                # ...unless the mouth was this wide open (a yawn,
+smile_yawn_guard_s = 2.0            # which MediaPipe partly reads as a smile) lately
 microsleep_needs_visible_eyes = false  # true: with eyes occluded a microsleep no
                                        # longer forces an alarm on its own (fewer
                                        # glare false alarms, but a real microsleep

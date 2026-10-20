@@ -39,6 +39,8 @@ class Settings:
     # (on top of the smile rule), e.g. looking down or sideways.
     ignore_closure: Callable[[pd.DataFrame], np.ndarray] | None = None
     use_smile_rule: bool = True
+    # Override how "smiling" is decided per frame (default: the pipeline's rule).
+    smiling_rule: Callable[[pd.DataFrame, AppConfig], np.ndarray] | None = None
     # Yawn signal: "mar" (shipped) or MediaPipe's "jawOpen" score.
     yawn_signal: str = "mar"
 
@@ -114,11 +116,16 @@ def simulate(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     static, adaptive = StaticFusion(cfg.fusion), AdaptiveFusion(cfg.fusion)
 
     has_smile = "bs_mouthSmile" in df and df["bs_mouthSmile"].notna().any()
-    smiling = (
-        smile_mean(df, cfg.conditions.smile_window_s) > cfg.conditions.smile_threshold
-        if has_smile and settings.use_smile_rule
-        else np.zeros(len(df), bool)
-    )
+    if not (has_smile and settings.use_smile_rule):
+        smiling = np.zeros(len(df), bool)
+    elif settings.smiling_rule is not None:
+        smiling = np.asarray(settings.smiling_rule(df, cfg), bool)
+    else:
+        cond = cfg.conditions
+        smiling = smile_mean(df, cond.smile_window_s) > cond.smile_threshold
+        wide = df.set_index(pd.to_datetime(df["timestamp_s"], unit="s"))["mar"].fillna(0)
+        recent_max = wide.rolling(f"{int(cond.smile_yawn_guard_s * 1000)}ms").max().to_numpy()
+        smiling &= recent_max <= cond.smile_max_mar
     extra = (
         np.asarray(settings.ignore_closure(df), bool)
         if settings.ignore_closure is not None
