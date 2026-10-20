@@ -1,3 +1,5 @@
+import dataclasses
+
 import cv2
 import numpy as np
 import pytest
@@ -189,3 +191,14 @@ def test_measure_on_real_face(awake_frame, kind, dark, occluded):
 def test_ear_asymmetry(left, right, yaw, expected):
     signals = FaceSignals(left, right, 0.1, HeadPose(0.0, yaw, 0.0))
     assert ear_asymmetry(signals, ConditionConfig()) == expected
+
+
+def test_smiling_follows_the_recent_smile_score(detector):
+    smile = dataclasses.replace(CLEAR, smile=0.6)
+    state, t = _feed(detector, CLEAR, 2.0, 0.0)
+    assert not state.smiling and state.label == "normal"
+    state, t = _feed(detector, smile, 1.0, t)
+    assert state.smiling and state.label == "smiling"
+    assert state.normal  # smiling does not change the fusion weights
+    state, _ = _feed(detector, CLEAR, 1.2, t)
+    assert not state.smiling

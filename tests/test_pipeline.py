@@ -173,23 +173,69 @@ def test_single_dropped_frame_does_not_reset_microsleep(config, awake_frame, dro
     assert report.alert_level >= AlertLevel.ALARM
 
 
-def test_low_light_switches_to_adaptive_weights(config, awake_frame, drowsy_frame):
+def test_low_light_is_detected_but_keeps_weights(config, awake_frame, drowsy_frame):
     with DrowsinessPipeline(config) as pipeline:
         report, t = _feed(pipeline, awake_frame, 2.5, 0.0)
         assert report.conditions.normal
-        assert report.fusion.weights.eye == pytest.approx(0.5)
-
         dark = (drowsy_frame * 0.2).astype(np.uint8)
         report, _ = _feed(pipeline, dark, 3.0, t)
     assert report.conditions.low_light and not report.conditions.eye_occluded
-    assert report.fusion.weights.eye == pytest.approx(0.2)
+    assert report.fusion.weights.eye == pytest.approx(0.5)
     assert report.fusion.score == pytest.approx(report.adaptive_score)
-    # The same indicator scores, weighted the two ways.
+    # Eyes really closed and no smile: both strategies agree.
+    assert report.eye_adaptive.closed and report.eye_static.closed
+    assert report.adaptive_score == pytest.approx(report.static_score)
+    row = report.to_row()
+    assert row["low_light"] == 1 and row["eye_weight"] == pytest.approx(0.5)
+
+
+def test_occlusion_switches_to_adaptive_weights(config, awake_frame, drowsy_frame, monkeypatch):
+    from drowsiness import pipeline as pipeline_module
+    from drowsiness.conditions import FrameConditions
+
+    covered = FrameConditions(
+        face_brightness=80,
+        frame_brightness=120,
+        glare_fraction=0.0,
+        eye_contrast_ratio=0.02,
+        ear_asymmetry=0,
+    )
+    with DrowsinessPipeline(config) as pipeline:
+        _, t = _feed(pipeline, awake_frame, 2.5, 0.0)
+        monkeypatch.setattr(pipeline_module, "measure", lambda *a: covered)
+        report, _ = _feed(pipeline, drowsy_frame, 3.0, t)
+    assert report.conditions.eye_occluded
+    assert report.fusion.weights.eye == pytest.approx(0.2)
     s = report.scores
     assert report.static_score == pytest.approx(0.5 * s.eye + 0.2 * s.yawn + 0.3 * s.head)
     assert report.adaptive_score == pytest.approx(0.2 * s.eye + 0.35 * s.yawn + 0.45 * s.head)
+
+
+def test_smiling_closures_ignored_by_adaptive_only(config, awake_frame, drowsy_frame, monkeypatch):
+    """Eyes narrowed by a smile: the static baseline counts them as closed (and
+    alarms), the expression-aware adaptive cue does not."""
+    from drowsiness import pipeline as pipeline_module
+
+    config = dataclasses.replace(
+        config, fusion=dataclasses.replace(config.fusion, strategy="adaptive")
+    )
+    real_measure = pipeline_module.measure
+
+    def smiling(*args):
+        return dataclasses.replace(real_measure(*args), smile=0.6)
+
+    with DrowsinessPipeline(config) as pipeline:
+        _, t = _feed(pipeline, awake_frame, 2.5, 0.0)
+        monkeypatch.setattr(pipeline_module, "measure", smiling)
+        report, _ = _feed(pipeline, drowsy_frame, 2.5, t)
+    assert report.conditions.smiling and "smiling" in report.conditions.label
+    assert report.eye_static.microsleep and report.static_score >= 0.45
+    # At most the first frame or two count, before the 1 s smile average catches up.
+    assert not report.eye_adaptive.closed and not report.eye_adaptive.microsleep
+    assert report.eye_adaptive.score < 0.05
+    assert report.alert_level == AlertLevel.NONE
     row = report.to_row()
-    assert row["low_light"] == 1 and row["eye_weight"] == pytest.approx(0.2)
+    assert row["microsleep_static"] == 1 and row["microsleep_adaptive"] == 0
 
 
 def test_static_strategy_ignores_conditions(config, awake_frame):

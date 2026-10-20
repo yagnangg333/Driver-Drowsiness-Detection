@@ -64,6 +64,8 @@ def test_int_accepted_for_float():
         ({"conditions": {"occlusion_exit": 0.9}}, "occlusion_exit < occlusion_enter"),
         ({"conditions": {"glare_fraction": 2.0}}, "between 0 and 1"),
         ({"conditions": {"smoothing_s": 0.0}}, "smoothing_s must be > 0"),
+        ({"conditions": {"smile_threshold": 1.5}}, "between 0 and 1"),
+        ({"conditions": {"smile_window_s": 0.0}}, "smile_window_s must be > 0"),
         ({"conditions": {"asymmetry_min_open_ear": 0.0}}, "asymmetry_min_open_ear"),
     ],
 )

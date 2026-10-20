@@ -39,7 +39,9 @@ def load(dataset: str) -> pd.DataFrame:
                     part["timestamp_s"],
                     part[f"{s}_score"],
                     part["face_detected"].astype(bool),
-                    part["microsleep"].astype(bool),
+                    part[f"microsleep_{s}" if f"microsleep_{s}" in part else "microsleep"].astype(
+                        bool
+                    ),
                     part["calibrating"].astype(bool),
                     ALERTS,
                 )

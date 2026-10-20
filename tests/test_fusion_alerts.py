@@ -186,10 +186,16 @@ def test_adaptive_equals_static_in_normal_conditions():
         assert adaptive.fuse(scores, NORMAL, t) == static.fuse(scores)
 
 
-@pytest.mark.parametrize("conditions", [LOW_LIGHT, OCCLUDED])
-def test_adaptive_weights_follow_condition_table(conditions):
+def test_low_light_keeps_normal_weights_by_default():
+    # Real night footage showed the eye cue stays reliable in low light.
     fusion = AdaptiveFusion(FusionConfig(transition_s=0))
-    result = fusion.fuse(IndicatorScores(1.0, 0.0, 0.0), conditions, 0.0)
+    result = fusion.fuse(IndicatorScores(1.0, 0.0, 0.0), LOW_LIGHT, 0.0)
+    assert result.weights == StaticFusion(FusionConfig()).weights
+
+
+def test_adaptive_weights_follow_condition_table():
+    fusion = AdaptiveFusion(FusionConfig(transition_s=0))
+    result = fusion.fuse(IndicatorScores(1.0, 0.0, 0.0), OCCLUDED, 0.0)
     assert result.weights.eye == pytest.approx(0.20)
     assert result.weights.yawn == pytest.approx(0.35)
     assert result.weights.head == pytest.approx(0.45)
@@ -214,9 +220,9 @@ def test_adaptive_weights_change_gradually():
     fusion = AdaptiveFusion(FusionConfig(transition_s=1.0))
     scores = IndicatorScores(1.0, 0.0, 0.0)
     assert fusion.fuse(scores, NORMAL, 0.0).weights.eye == pytest.approx(0.5)
-    halfway = fusion.fuse(scores, LOW_LIGHT, 0.15).weights
+    halfway = fusion.fuse(scores, OCCLUDED, 0.15).weights
     assert 0.2 < halfway.eye < 0.5
     assert halfway.eye + halfway.yawn + halfway.head == pytest.approx(1.0)
-    assert fusion.fuse(scores, LOW_LIGHT, 1.2).weights.eye == pytest.approx(0.2)
+    assert fusion.fuse(scores, OCCLUDED, 1.2).weights.eye == pytest.approx(0.2)
     fusion.reset()
-    assert fusion.fuse(scores, LOW_LIGHT, 2.0).weights.eye == pytest.approx(0.2)
+    assert fusion.fuse(scores, OCCLUDED, 2.0).weights.eye == pytest.approx(0.2)

@@ -194,6 +194,13 @@ class ConditionConfig:
     occlusion_enter: float = 0.6
     occlusion_exit: float = 0.3
     smoothing_s: float = 1.0
+    # Expression: smiling and laughing narrow the eyes without drowsiness; on
+    # NTHU-DDD they caused most false eye closures. While MediaPipe's smile
+    # score (mean of mouthSmileLeft/Right) averaged over ``smile_window_s``
+    # exceeds ``smile_threshold``, the adaptive strategy does not count eye
+    # closures. Real drowsy closures had smile <= 0.003 (90th percentile).
+    smile_threshold: float = 0.10
+    smile_window_s: float = 1.0
     # If true, a microsleep does not force an alarm on its own while the eyes are
     # occluded (glare can make open eyes read as closed). Off by default: the eye
     # weight under occlusion (0.2) is below the warning threshold, so with it on
@@ -216,6 +223,8 @@ class ConditionConfig:
             "asymmetry_min_open_ear",
             "smoothing_s",
         )
+        _require_fraction("conditions", self, "smile_threshold")
+        _require_positive("conditions", self, "smile_window_s")
         _require(
             0 <= self.occlusion_exit < self.occlusion_enter <= 1,
             "conditions: need 0 <= occlusion_exit < occlusion_enter <= 1",
@@ -239,10 +248,14 @@ class FusionConfig:
     eye_weight: float = 0.5
     yawn_weight: float = 0.2
     head_weight: float = 0.3
-    # Low light: eye landmarks get noisy, so trust mouth and head more.
-    low_light_eye_weight: float = 0.2
-    low_light_yawn_weight: float = 0.35
-    low_light_head_weight: float = 0.45
+    # Low light: the same as normal. On real night driving (NITYMED) the eye
+    # measurements were as precise as by day (EAR noise 0.8% vs 0.7%) and eye
+    # closures read at night were real, so lowering the eye weight there only
+    # discarded good evidence (night microsleep videos with an alarm: 94.7%
+    # static vs 84.2% with eye weight 0.2). Low light is still detected and shown.
+    low_light_eye_weight: float = 0.5
+    low_light_yawn_weight: float = 0.2
+    low_light_head_weight: float = 0.3
     # Eye region occluded (glare, dark glasses, hand).
     occluded_eye_weight: float = 0.2
     occluded_yawn_weight: float = 0.35
