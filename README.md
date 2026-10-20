@@ -53,7 +53,7 @@ flowchart LR
 5. **Conditions.** Every frame is checked for conditions that can mislead the eye cue:
    - **Low light:** the mean brightness (0–255) of the **whole frame** is below 76. Cameras brighten dark scenes automatically, so at night the driver's face still looks normally lit (median 80 in real night footage), but the frame as a whole stays dark (median 52) because of the dark car and road.
    - **Eye occlusion:** the eyes cannot be seen at all. A frame counts as occluded if there is glare on ≥ 15% of an eye region, the eye region is almost flat compared with the rest of the face (contrast ratio < 0.05: dark lenses, a hand), or the two eyes read very differently while the head faces ahead and at least one eye is clearly open (one eye hidden). Clear glasses do not count, closing both eyes never counts, and lightly tinted sunglasses are deliberately not flagged: the landmarks read the eyes through them as well as through clear glasses.
-   - **Smiling:** MediaPipe's smile score (mean of `mouthSmileLeft/Right`, averaged over 1 s) above 0.10. Smiling and laughing narrow the eyes without drowsiness; on NTHU-DDD they caused most false eye closures. A wide-open mouth (MAR > 0.45 in the last 2 s) is a yawn, not a smile, even though MediaPipe scores 36–54% of yawn frames as smiles.
+   - **Smiling:** MediaPipe's smile score (mean of `mouthSmileLeft/Right`, averaged over 1 s) above 0.10 **and** at least 0.10 above the driver's resting smile, measured during calibration. Smiling and laughing narrow the eyes without drowsiness; on NTHU-DDD they caused most false eye closures. The resting-smile margin matters for safety: some faces and camera angles score above 0.10 at rest (without it, 21 of 105 YawDD normal-driving clips read as "smiling" most of the time, so those drivers' eye closures would have been ignored; with it, 5). A wide-open mouth (MAR above the yawn threshold in the last 2 s) is a yawn, not a smile, even though MediaPipe scores 36–54% of yawn frames as smiles.
 
    Both are smoothed over about 1 s with a time-based exponential moving average and have separate enter and exit thresholds (low light starts below 76 and ends above 84), so a passing shadow or reflection does not switch them.
 
@@ -77,7 +77,7 @@ flowchart LR
    | Low light | 0.50 | 0.20 | 0.30 |
    | Eye region occluded | 0.20 | 0.35 | 0.45 |
 
-   **Why low light no longer changes the weights.** The original plan lowered the eye weight in low light. Real night driving (NITYMED) showed the eye cue stays reliable there: eye-measurement noise was 0.8% at night against 0.7% by day, and night "eyes closed" readings were real closures on inspection. Lowering the eye weight only discarded evidence (night microsleep videos raising an alarm fell from 94.7% to 84.2%). Low light is still detected, shown and logged.
+   **Why low light no longer changes the weights.** The original plan lowered the eye weight in low light. Real night driving (NITYMED) showed the eye cue stays reliable there: eye-measurement noise was 0.8% at night against 0.7% by day, and night "eyes closed" readings were real closures on inspection. Lowering the eye weight only discarded evidence (night microsleep videos raising an alarm fell from 94.7% to 84.2%). Low light is still detected, shown and logged, and keeps whatever the normal weights are; `fusion.adapt_to_low_light = true` switches to the original low-light weights (0.20 / 0.35 / 0.45).
 
    With several conditions, each cue gets its lowest weight before normalising. Weights move to new values over 1 s instead of jumping. A microsleep still forces an alarm in every condition: under occlusion the eye weight (0.2) is below the warning threshold (0.25), so without that rule a real microsleep behind glare would raise no alert at all.
 7. **Alerts:**
@@ -217,7 +217,7 @@ ruff format src tests        # format
 
 GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `main` and every pull request.
 
-The tests cover the signal maths, timing logic, alerts (including face loss and microsleep), condition detection and adaptive fusion, calibration rejection, config validation, camera dropouts, audio, the CLI and a dashboard smoke test. End-to-end tests run the real model on two recorded frames (and on copies with simulated low light, dark glasses, glare and a hand over one eye), and head-pose signs are checked against real face geometry. They check that the code behaves as designed. They don't measure detection accuracy; that needs labelled video (Phase 4).
+The tests cover the signal maths, timing logic, alerts (including face loss and microsleep), condition detection and adaptive fusion, calibration rejection, config validation, camera dropouts, audio, the CLI and a dashboard smoke test. End-to-end tests run the real model on two recorded frames (and on copies with simulated low light, dark glasses, glare and a hand over one eye), and head-pose signs are checked against real face geometry. They check that the code behaves as designed; detection accuracy is measured separately on public datasets (see [Evaluation results](#evaluation-results)).
 
 ## Tuning tips
 

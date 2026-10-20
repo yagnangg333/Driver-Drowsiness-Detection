@@ -88,7 +88,60 @@ def main() -> int:
     pd.set_option("display.max_columns", None)
     print("\nAll datasets:")
     print(pd.DataFrame(rows).round(3).to_string(index=False))
+    print("\nNTHU-DDD held out (smile settings chosen without the scored subject):")
+    print(held_out().round(3).to_string(index=False))
     return 0
+
+
+def held_out(thresholds=(0.05, 0.10, 0.15, 0.20), margins=(0.05, 0.10, 0.15)) -> pd.DataFrame:
+    """NTHU-DDD results where the smile settings never saw the scored subject.
+
+    For each subject, the smile threshold and margin with the best F1 on the
+    other three subjects are used to score it; the predictions are pooled.
+    The static baseline has nothing tuned on NTHU-DDD, so it is scored as is.
+    """
+    from drowsiness.evaluation import binary_metrics, roc_auc
+
+    recs = td.recordings("nthu")
+    replay.with_nthu_baselines(recs, AppConfig())
+    grid = [(t, m) for t in thresholds for m in margins]
+
+    def sim(t, m):
+        return replay.Settings(
+            config=replay.configure(
+                AppConfig(), conditions={"smile_threshold": t, "smile_margin": m}
+            )
+        )
+
+    subjects = sorted({str(df["subject"].iloc[0]).zfill(3) for df in recs})
+    y, adaptive, static, a_score, s_score = [], [], [], [], []
+    for held in subjects:
+        train = set(subjects) - {held}
+        t, m = max(grid, key=lambda g: td.nthu_scores(sim(*g), train)["f1"])
+        for df in recs:
+            if str(df["subject"].iloc[0]).zfill(3) != held:
+                continue
+            out = replay.simulate(df, sim(t, m))
+            y.append(df["drowsy"].to_numpy() == 1)
+            adaptive.append(out["adaptive_level"].to_numpy() >= 1)
+            static.append(out["static_level"].to_numpy() >= 1)
+            a_score.append(out["adaptive_score"].to_numpy())
+            s_score.append(out["static_score"].to_numpy())
+    y = np.concatenate(y)
+    rows = []
+    for name, pred, score in (("static", static, s_score), ("adaptive", adaptive, a_score)):
+        mm = binary_metrics(y, np.concatenate(pred))
+        rows.append(
+            {
+                "fusion": name,
+                "F1": mm["f1"],
+                "false alarms": mm["false_alarm_rate"],
+                "recall": mm["recall"],
+                "precision": mm["precision"],
+                "ROC-AUC": roc_auc(y, np.concatenate(score)),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 if __name__ == "__main__":
