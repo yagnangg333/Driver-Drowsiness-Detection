@@ -234,8 +234,12 @@ def test_smiling_closures_ignored_by_adaptive_only(config, awake_frame, drowsy_f
     assert not report.eye_adaptive.closed and not report.eye_adaptive.microsleep
     assert report.eye_adaptive.score < 0.05
     assert report.alert_level == AlertLevel.NONE
+    # The dashboard shows what the static baseline would do meanwhile.
+    assert report.adaptive_level == AlertLevel.NONE
+    assert report.static_level >= AlertLevel.ALARM
     row = report.to_row()
     assert row["microsleep_static"] == 1 and row["microsleep_adaptive"] == 0
+    assert row["static_level"] >= 2 and row["adaptive_level"] == 0
 
 
 def test_static_strategy_ignores_conditions(config, awake_frame):

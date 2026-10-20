@@ -141,9 +141,11 @@ def _panel(slot, report: FrameReport) -> None:
     s = report.signals
     pose = s.pose if s else None
     with slot.container():
-        c1, c2, c3, c4 = st.columns(4)
+        # Two per row, so the values never get cut off in a narrow column.
+        c1, c2 = st.columns(2)
         c1.metric("EAR", f"{s.ear:.2f}" if s else "-")
         c2.metric("MAR", f"{s.mar:.2f}" if s else "-")
+        c3, c4 = st.columns(2)
         c3.metric("Pitch", f"{pose.pitch:+.0f}°" if pose else "-")
         c4.metric("Roll", f"{pose.roll:+.0f}°" if pose else "-")
 
@@ -159,19 +161,22 @@ def _panel(slot, report: FrameReport) -> None:
         st.progress(report.head.score, text=f"Head tilt {report.head.score:.2f}")
         st.progress(
             min(report.fusion.score, 1.0),
-            text=f"**Fused drowsiness score {report.fusion.score:.2f}** "
-            f"({report.fusion_name}; static {report.static_score:.2f}, "
-            f"adaptive {report.adaptive_score:.2f})",
+            text=f"**Fused drowsiness score {report.fusion.score:.2f}** ({report.fusion_name})",
         )
 
-        c = report.conditions
-        light = "-" if c.brightness is None else f"{c.brightness:.0f}"
-        detail = f"scene brightness {light}"
-        if c.normal:
-            st.caption(f"Conditions: normal ({detail})")
-        else:
-            why = f" ({', '.join(c.reasons)})" if c.reasons else ""
-            st.warning(f"Conditions: {c.label}{why}; {detail}")
+        st.markdown(_conditions_badges(report))
+        if not report.calibrating:
+            s1, s2 = st.columns(2)
+            s1.markdown(
+                f"**Static** (fixed weights)  \n{_level_badge(report.static_level)} "
+                f"score {report.static_score:.2f}"
+            )
+            s2.markdown(
+                f"**Adaptive** (ours)  \n{_level_badge(report.adaptive_level)} "
+                f"score {report.adaptive_score:.2f}"
+            )
+            if report.static_level > report.adaptive_level and report.conditions.smiling:
+                st.caption("Smiling: the static baseline reads the narrowed eyes as closing.")
 
         w = report.fusion.weights
         b = report.baseline
@@ -182,6 +187,35 @@ def _panel(slot, report: FrameReport) -> None:
         st.caption(caption)
         if b and not b.calibrated and report.calibration_note:
             st.warning(report.calibration_note)
+
+
+_LEVEL_BADGES = {
+    AlertLevel.NONE: ":green-badge[Normal]",
+    AlertLevel.WARNING: ":orange-badge[Warning]",
+    AlertLevel.ALARM: ":red-badge[Alarm]",
+    AlertLevel.CRITICAL: ":red-badge[CRITICAL]",
+}
+
+
+def _level_badge(level: AlertLevel) -> str:
+    return _LEVEL_BADGES[level]
+
+
+def _conditions_badges(report: FrameReport) -> str:
+    """One line of Streamlit colour badges for the detected conditions."""
+    c = report.conditions
+    light = "-" if c.brightness is None else f"{c.brightness:.0f}"
+    badges = []
+    if c.smiling:
+        badges.append(":green-badge[😀 Smiling: eye closures ignored]")
+    if c.low_light:
+        badges.append(f":blue-badge[🌙 Low light ({light})]")
+    if c.eye_occluded:
+        why = f": {', '.join(c.reasons)}" if c.reasons else ""
+        badges.append(f":orange-badge[🕶️ Eyes occluded{why}]")
+    if not badges:
+        badges.append(f":gray-badge[Conditions normal · brightness {light}]")
+    return " ".join(badges)
 
 
 def _event_rows(events: list[AlertEvent]) -> pd.DataFrame:
