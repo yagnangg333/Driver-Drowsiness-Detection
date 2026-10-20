@@ -48,7 +48,7 @@ flowchart LR
      A closure only ends once the eyes stay open for 0.15 s, so one noisy frame can't reset the microsleep timer.
 
      "Closed" here means EAR below 60% of the open-eye value (75% was tried first, but it also counted smiles, squints and looking down). That is looser than the ≥ 80%-eyelid-closure (P80) definition used by classic PERCLOS, so the ratio is not directly comparable with PERCLOS values in the literature.
-   - **Yawning:** the number of yawns in the last 60 seconds. A yawn is the mouth held wide open for at least 1.5 seconds.
+   - **Yawning:** the number of yawns in the last 60 seconds. A yawn is the mouth held open (MAR above 0.45) for at least 1 second; tuned on YawDD and checked on NITYMED.
    - **Head:** how long the head has been nodded forward by more than 15° or tilted sideways by more than 20°.
 5. **Conditions.** Every frame is checked for two conditions that make the eye cue unreliable:
    - **Low light:** the mean brightness (0–255) of the **whole frame** is below 76. Cameras brighten dark scenes automatically, so at night the driver's face still looks normally lit (median 80 in real night footage), but the frame as a whole stays dark (median 52) because of the dark car and road.

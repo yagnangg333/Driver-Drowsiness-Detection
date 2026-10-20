@@ -113,9 +113,11 @@ class IndicatorConfig:
     # A closure only ends once the eyes stay open this long, so a single
     # noisy frame does not reset the microsleep timer.
     closure_debounce_s: float = 0.15
-    # Yawning
-    yawn_mar_threshold: float = 0.5
-    yawn_min_duration_s: float = 1.5
+    # Yawning. Tuned on YawDD (chosen on half of the drivers, checked on the
+    # other half): yawns caught in yawning clips 56% -> 69% with 1 false yawn
+    # in ~50 talking clips; on NITYMED night videos 1.76 -> 2.34 of 3 yawns.
+    yawn_mar_threshold: float = 0.45
+    yawn_min_duration_s: float = 1.0
     yawn_window_s: float = 60.0
     yawns_for_max: int = 3
     # A yawn in progress only ends once MAR stays below the threshold this long.
