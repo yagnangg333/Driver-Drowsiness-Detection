@@ -13,8 +13,8 @@ The system tracks the driver's face from a webcam with MediaPipe. It combines th
 |---|---|---|
 | 1 | Landmark pipeline; EAR, MAR, head pose | Implemented; not yet validated on real data |
 | 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | Implemented; not yet validated on real data |
-| 3 | Condition detection (low light, eye occlusion) + adaptive fusion | Implemented; weights not yet tuned (CE‑2, Nov 1) |
-| 4 | Evaluation vs. static baseline on datasets and own clips | Planned |
+| 3 | Condition detection + adaptive (expression-aware) fusion | Implemented, tuned on real footage |
+| 4 | Evaluation vs. static baseline on four public datasets | Done ([results](#evaluation-results)); own clips pending |
 | 5 | Dashboard polish, documentation, final report | Planned (Endsem) |
 
 ## How it works
@@ -50,9 +50,10 @@ flowchart LR
      "Closed" here means EAR below 60% of the open-eye value (75% was tried first, but it also counted smiles, squints and looking down). That is looser than the ≥ 80%-eyelid-closure (P80) definition used by classic PERCLOS, so the ratio is not directly comparable with PERCLOS values in the literature.
    - **Yawning:** the number of yawns in the last 60 seconds. A yawn is the mouth held open (MAR above 0.45) for at least 1 second; tuned on YawDD and checked on NITYMED.
    - **Head:** how long the head has been nodded forward by more than 15° or tilted sideways by more than 20°.
-5. **Conditions.** Every frame is checked for two conditions that make the eye cue unreliable:
+5. **Conditions.** Every frame is checked for conditions that can mislead the eye cue:
    - **Low light:** the mean brightness (0–255) of the **whole frame** is below 76. Cameras brighten dark scenes automatically, so at night the driver's face still looks normally lit (median 80 in real night footage), but the frame as a whole stays dark (median 52) because of the dark car and road.
-   - **Eye occlusion:** the eyes cannot be seen at all. A frame counts as occluded if there is glare on ≥ 15% of an eye region, the eye region is almost flat compared with the rest of the face (contrast ratio < 0.10: dark lenses, a hand), or the two eyes read very differently while the head faces ahead and at least one eye is clearly open (one eye hidden). Clear glasses do not count, closing both eyes never counts, and lightly tinted sunglasses are deliberately not flagged: the landmarks read the eyes through them as well as through clear glasses.
+   - **Eye occlusion:** the eyes cannot be seen at all. A frame counts as occluded if there is glare on ≥ 15% of an eye region, the eye region is almost flat compared with the rest of the face (contrast ratio < 0.05: dark lenses, a hand), or the two eyes read very differently while the head faces ahead and at least one eye is clearly open (one eye hidden). Clear glasses do not count, closing both eyes never counts, and lightly tinted sunglasses are deliberately not flagged: the landmarks read the eyes through them as well as through clear glasses.
+   - **Smiling:** MediaPipe's smile score (mean of `mouthSmileLeft/Right`, averaged over 1 s) above 0.10. Smiling and laughing narrow the eyes without drowsiness; on NTHU-DDD they caused most false eye closures. A wide-open mouth (MAR > 0.45 in the last 2 s) is a yawn, not a smile, even though MediaPipe scores 36–54% of yawn frames as smiles.
 
    Both are smoothed over about 1 s with a time-based exponential moving average and have separate enter and exit thresholds (low light starts below 76 and ends above 84), so a passing shadow or reflection does not switch them.
 
@@ -65,18 +66,20 @@ flowchart LR
    | Day driving, sunglasses (YawDD) | 0% | 1.3% |
    | Indoor webcam (UTA-RLDD) | 0% | 0% |
 
-   The occlusion check was tuned to flag at most 3% of single frames of uncovered eyes in every dataset, because a false occlusion lowers the eye weight for a driver whose eyes are perfectly visible.
+   The occlusion check was tuned to flag at most 3% of single frames of uncovered eyes in every dataset, because a false occlusion lowers the eye weight for a driver whose eyes are perfectly visible; the final contrast floor (0.05) flags no frame of any real dataset.
 6. **Fusion.** The score is a weighted average of the three indicator scores. Two strategies share one interface and both run on every frame, so they are compared on identical inputs:
-   - **Static** (baseline): fixed weights, eyes 0.5, yawning 0.2, head 0.3.
-   - **Adaptive** (default): the weights depend on the conditions. Under normal conditions they equal the static weights, so any difference comes only from adapting.
+   - **Static** (baseline): fixed weights, eyes 0.5, yawning 0.2, head 0.3; every eye closure counts.
+   - **Adaptive** (default, condition-aware): eye closures while **smiling** are not counted, and the weights change when the **eyes are occluded**. Otherwise it equals the static strategy, so any difference comes only from adapting.
 
    | Condition | Eye | Yawn | Head |
    |---|---|---|---|
    | Normal | 0.50 | 0.20 | 0.30 |
-   | Low light | 0.20 | 0.35 | 0.45 |
+   | Low light | 0.50 | 0.20 | 0.30 |
    | Eye region occluded | 0.20 | 0.35 | 0.45 |
 
-   With both conditions, each cue gets its lower weight before normalising. Weights move to new values over 1 s instead of jumping. A microsleep still forces an alarm in every condition: under occlusion the eye weight (0.2) is below the warning threshold (0.25), so without that rule a real microsleep behind glare would raise no alert at all. (`conditions.microsleep_needs_visible_eyes = true` trades that safety for fewer glare false alarms; Phase 4 measures both.) These values are starting points to be tuned in Phase 4.
+   **Why low light no longer changes the weights.** The original plan lowered the eye weight in low light. Real night driving (NITYMED) showed the eye cue stays reliable there: eye-measurement noise was 0.8% at night against 0.7% by day, and night "eyes closed" readings were real closures on inspection. Lowering the eye weight only discarded evidence (night microsleep videos raising an alarm fell from 94.7% to 84.2%). Low light is still detected, shown and logged.
+
+   With several conditions, each cue gets its lowest weight before normalising. Weights move to new values over 1 s instead of jumping. A microsleep still forces an alarm in every condition: under occlusion the eye weight (0.2) is below the warning threshold (0.25), so without that rule a real microsleep behind glare would raise no alert at all.
 7. **Alerts:**
 
    | Level | Trigger | Action |
@@ -95,6 +98,34 @@ flowchart LR
    - Eye closure alone reaches Level 2 from the microsleep rule and Level 3 only by escalation.
 
    Recalibrating (the `c` key, or restarting detection in the dashboard) clears the alert state, so alerts are suppressed for the few seconds calibration takes.
+
+## Evaluation results
+
+Phase 4 ran the full pipeline over four public datasets (489 recordings, about 630,000 frames) with [`tools/run_evaluation.py`](tools/run_evaluation.py); [`tools/evaluation_report.py`](tools/evaluation_report.py) produces the tables. Both strategies come from the same pass: the alert state machine is replayed over each strategy's score, so they are compared on identical input. The datasets live in `data/` (not in git); see the references.
+
+| Dataset | What it measures | Static | Adaptive |
+|---|---|---|---|
+| **NTHU-DDD** (18,000 labelled frames, 4 subjects) | F1 at warning / alarm level | 76.6% / 71.8% | **80.9% / 76.4%** |
+| | false-alarm rate at warning / alarm level | 34.8% / 22.4% | **23.0% / 10.7%** |
+| | recall (warning level) | 83.6% | 83.6% |
+| | ROC-AUC of the fused score | 0.823 | **0.883** |
+| **YawDD** (320 day-driving clips) | talking clips with a (false) warning | 33–36% | **9–12%** |
+| | normal-driving clips with a (false) warning | 12–14% | **9–10%** |
+| | yawning clips with a yawn detected | 68–77% | 68–77% |
+| **UTA-RLDD** (36 ten-minute videos, real drowsiness) | AUC drowsy vs alert video (mean score) | 0.868 | 0.861 |
+| | subjects whose drowsy video scores higher | 12/12 | 12/12 |
+| **NITYMED** (126 night-driving videos) | microsleep videos raising an alarm | 94.7% | 94.7% |
+| | yawns detected per video (3 performed) | 2.34 | 2.34 |
+
+Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same recall) while cutting false alarms by a third at warning level and by half at alarm level. The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms in the data.
+
+**How the settings were checked.** [`tools/replay.py`](tools/replay.py) re-runs everything after face tracking on the recorded signals (it matches the pipeline on 98.6–99.98% of frames), and [`tools/tune_detection.py`](tools/tune_detection.py) scores settings on all datasets. Every change was chosen on part of the data and checked on unseen data:
+
+- The smile rule, tested leave-one-subject-out on NTHU-DDD, helps every subject (mean held-out F1 74.4% → 78.3%, false alarms 32.5% → 19.7%, recall unchanged).
+- The yawn rule (MAR > 0.45 for 1.0 s instead of 0.5 for 1.5 s) was chosen on half of the YawDD drivers: yawns caught on the other half 56% → 69%, with one false yawn in about 50 talking clips; on NITYMED, 1.76 → 2.34 of 3 yawns per video.
+- Rejected because they did not hold on unseen subjects: other eye-closure thresholds, a shorter or warm-up PERCLOS window, longer microsleep time, ignoring closures while the mouth stretches, letting the eye score alone raise alarms ("peak fusion", which raised false warnings on awake drivers from 23% to 41% of clips) and counting backward head tilts.
+
+**Limitations of the evaluation.** NTHU-DDD (Kaggle copy) has four subjects and acted drowsiness; UTA-RLDD and NITYMED have only per-video labels; no public dataset has dark sunglasses or hands over the eyes with drowsiness labels, so those cases are tested only with simulated frames. Processing times in the tables are with six recordings processed in parallel; live, the pipeline needs about 10–15 ms per frame.
 
 ## Setup
 
@@ -158,7 +189,7 @@ src/drowsiness/
   cli.py           command-line interface
   dashboard.py     Streamlit dashboard
 tests/             unit tests + end-to-end tests on real frames
-tools/             threshold tuning on the evaluation datasets (needs data/)
+tools/             evaluation, offline replay and tuning on the datasets (needs data/)
 configs/           default configuration
 models/            MediaPipe face landmarker model
 assets/            alarm sound, reference images
@@ -187,6 +218,12 @@ The tests cover the signal maths, timing logic, alerts (including face loss and 
 1. C. Lugaresi et al., "MediaPipe: A Framework for Building Perception Pipelines," arXiv:1906.08172, 2019.
 2. T. Soukupová and J. Čech, "Real-Time Eye Blink Detection using Facial Landmarks," CVWW, 2016.
 3. Q. Ji, Z. Zhu and P. Lan, "Real-time nonintrusive monitoring and prediction of driver fatigue," IEEE Trans. Vehicular Technology, 53(4), 2004.
+4. C.-H. Weng, Y.-H. Lai and S.-H. Lai, "Driver Drowsiness Detection via a Hierarchical Temporal Deep Belief Network," ACCV Workshops, 2016 (NTHU-DDD).
+5. S. Abtahi, M. Omidyeganeh, S. Shirmohammadi and B. Hariri, "YawDD: A Yawning Detection Dataset," Proc. ACM Multimedia Systems, 2014.
+6. R. Ghoddoosian, M. Galib and V. Athitsos, "A Realistic Dataset and Baseline Temporal Model for Early Drowsiness Detection," CVPR Workshops, 2019 (UTA-RLDD).
+7. N. Petrellis et al., "NITYMED: Night-Time Yawning-Microsleep-Eyeblink-driver Distraction," IEEE DataPort, 2022, doi:10.21227/85xe-3f88.
+
+The datasets are used for non-commercial academic evaluation under their own terms and are not redistributed with this repository.
 
 ## License
 
