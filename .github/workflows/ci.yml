@@ -36,8 +36,8 @@ jobs:
 
       - name: Lint
         run: |
-          ruff check src tests
-          ruff format --check src tests
+          ruff check src tests tools
+          ruff format --check src tests tools
 
       - name: Test
         run: pytest --cov=drowsiness --cov-report=term-missing

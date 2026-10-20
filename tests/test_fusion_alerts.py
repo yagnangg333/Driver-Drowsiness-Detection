@@ -204,6 +204,7 @@ def test_adaptive_weights_follow_condition_table():
 
 def test_adaptive_both_conditions_take_lowest_weight_per_cue():
     config = FusionConfig(
+        adapt_to_low_light=True,
         low_light_eye_weight=0.4,
         low_light_yawn_weight=0.2,
         low_light_head_weight=0.4,
@@ -226,3 +227,11 @@ def test_adaptive_weights_change_gradually():
     assert fusion.fuse(scores, OCCLUDED, 1.2).weights.eye == pytest.approx(0.2)
     fusion.reset()
     assert fusion.fuse(scores, OCCLUDED, 2.0).weights.eye == pytest.approx(0.2)
+
+
+def test_low_light_follows_changed_normal_weights():
+    # Changing the normal weights (e.g. with the dashboard sliders) must not
+    # make low light fall back to some other weights.
+    config = FusionConfig(eye_weight=0.7, yawn_weight=0.1, head_weight=0.2, transition_s=0)
+    fusion = AdaptiveFusion(config)
+    assert fusion.target(LOW_LIGHT) == fusion.target(NORMAL) == StaticFusion(config).weights

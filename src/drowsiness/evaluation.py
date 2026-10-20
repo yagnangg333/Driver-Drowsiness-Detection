@@ -98,7 +98,12 @@ def detection_delays(
     timestamps: Sequence[float], positive: Sequence[bool], alerted: Sequence[bool]
 ) -> list[float | None]:
     """For each run of consecutive positive frames, the time from its first
-    frame to the first alerted frame within it; None if it was never alerted."""
+    frame to the first alerted frame within it; None if it was never alerted.
+
+    Runs that begin while the alert is already on (still raised from just
+    before, e.g. when labels split one drowsy period into several runs) are
+    skipped: their "delay" would be 0 without anything being detected.
+    """
     t = np.asarray(timestamps, dtype=float)
     pos = np.asarray(positive, dtype=bool)
     alert = np.asarray(alerted, dtype=bool)
@@ -111,7 +116,8 @@ def detection_delays(
         j = i
         while j + 1 < len(pos) and pos[j + 1]:
             j += 1
-        hits = np.flatnonzero(alert[i : j + 1])
-        delays.append(float(t[i + hits[0]] - t[i]) if hits.size else None)
+        if not (i > 0 and alert[i - 1]):
+            hits = np.flatnonzero(alert[i : j + 1])
+            delays.append(float(t[i + hits[0]] - t[i]) if hits.size else None)
         i = j + 1
     return delays

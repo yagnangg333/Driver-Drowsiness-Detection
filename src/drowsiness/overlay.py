@@ -94,11 +94,16 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
 
 def _conditions_line(report: FrameReport) -> str:
     c = report.conditions
-    if c.normal:
-        return "Cond: normal"
-    return "Cond: " + "+".join(
-        name for name, on in (("low light", c.low_light), ("eyes hidden", c.eye_occluded)) if on
-    )
+    names = [
+        name
+        for name, on in (
+            ("dark", c.low_light),
+            ("covered", c.eye_occluded),
+            ("smile", c.smiling),
+        )
+        if on
+    ]
+    return "Cond: " + ("+".join(names) or "normal")
 
 
 def _draw_banner(frame: np.ndarray, report: FrameReport) -> None:

@@ -68,8 +68,17 @@ def test_roc_auc_needs_both_classes():
 
 
 def test_detection_delays():
-    t = [0, 1, 2, 3, 4, 5, 6, 7, 8]
-    positive = [0, 1, 1, 1, 0, 1, 1, 0, 1]
-    alerted = [0, 0, 0, 1, 1, 0, 0, 0, 1]
+    t = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    positive = [0, 1, 1, 1, 0, 0, 1, 1, 0, 1]
+    alerted = [0, 0, 0, 1, 1, 0, 0, 0, 0, 1]
     # first episode starts at 1, alerted at 3; second never alerted; third at once
     assert detection_delays(t, positive, alerted) == [2.0, None, 0.0]
+
+
+def test_detection_delay_skips_episodes_that_start_already_alerted():
+    # The alert raised for the first episode is still on when the second
+    # begins: that is not a 0 s detection, so the episode is not scored.
+    t = [0, 1, 2, 3, 4, 5]
+    positive = [1, 1, 0, 1, 1, 0]
+    alerted = [0, 1, 1, 1, 1, 1]
+    assert detection_delays(t, positive, alerted) == [1.0]

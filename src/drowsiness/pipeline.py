@@ -154,7 +154,9 @@ class DrowsinessPipeline:
         self._adaptive = AdaptiveFusion(config.fusion)
         default = self._adaptive if config.fusion.strategy == "adaptive" else self._static
         self.fusion: FusionStrategy = fusion or default
-        self._conditions = ConditionDetector(config.conditions)
+        self._conditions = ConditionDetector(
+            config.conditions, config.indicators.yawn_mar_threshold
+        )
 
         ind = config.indicators
         eye_args = (ind.perclos_window_s, ind.perclos_max, ind.microsleep_s, ind.closure_debounce_s)
@@ -215,11 +217,14 @@ class DrowsinessPipeline:
             if face is not None and signals is not None
             else None
         )
-        conditions = self._conditions.update(timestamp, measured)
+        baseline = self._calibrator.result
+        conditions = self._conditions.update(
+            timestamp, measured, baseline.smile if baseline else None
+        )
 
         calibrating = not self._calibrator.done
         if calibrating:
-            self._calibrator.update(timestamp, signals)
+            self._calibrator.update(timestamp, signals, measured.smile if measured else None)
         elif signals is not None:
             self._face_missing_since = None
             self._update_indicators(timestamp, signals, self._calibrator.result, conditions)
@@ -249,7 +254,7 @@ class DrowsinessPipeline:
         if not calibrating:
             face_seen = face is not None
             static_event = self._static_alerts.update(
-                timestamp, static.score, face_seen, self._eye_static.state.microsleep and not gate
+                timestamp, static.score, face_seen, self._eye_static.state.microsleep
             )
             adaptive_event = self._adaptive_alerts.update(
                 timestamp,

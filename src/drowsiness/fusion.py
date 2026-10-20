@@ -93,6 +93,7 @@ class AdaptiveFusion:
             config.occluded_eye_weight, config.occluded_yawn_weight, config.occluded_head_weight
         )
         self._transition_s = config.transition_s
+        self._adapt_to_low_light = config.adapt_to_low_light
         self.reset()
 
     def reset(self) -> None:
@@ -101,7 +102,7 @@ class AdaptiveFusion:
 
     def target(self, conditions: Conditions) -> Weights:
         rows = []
-        if conditions.low_light:
+        if conditions.low_light and self._adapt_to_low_light:
             rows.append(self._low_light)
         if conditions.eye_occluded:
             rows.append(self._occluded)
