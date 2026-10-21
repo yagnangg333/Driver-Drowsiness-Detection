@@ -106,18 +106,20 @@ Phase 4 ran the full pipeline over four public datasets (489 recordings, about 6
 | Dataset | What it measures | Static | Adaptive |
 |---|---|---|---|
 | **NTHU-DDD** (18,000 labelled frames, 4 subjects) | F1 at warning / alarm level | 76.6% / 71.8% | **80.9% / 76.4%** |
-| | false-alarm rate at warning / alarm level | 34.8% / 22.4% | **23.0% / 10.7%** |
+| | false-alarm rate at warning / alarm level | 34.8% / 22.4% | **23.1% / 10.7%** |
 | | recall (warning level) | 83.6% | 83.6% |
 | | ROC-AUC of the fused score | 0.823 | **0.883** |
-| **YawDD** (320 day-driving clips) | talking clips with a (false) warning | 33–36% | **9–12%** |
-| | normal-driving clips with a (false) warning | 12–14% | **9–10%** |
+| | **held out:** F1 / false alarms, smile settings chosen without the scored subject | 76.5% / 35.0% | **82.7% / 18.4%** |
+| | drowsy episodes detected / median delay | 82.6% / 1.6 s | 82.6% / 1.6 s |
+| **YawDD** (320 day-driving clips) | talking clips with a (false) warning | 31% | **16%** |
+| | normal-driving clips with a (false) warning | 11.4% | **9.5%** |
 | | yawning clips with a yawn detected | 68–77% | 68–77% |
 | **UTA-RLDD** (36 ten-minute videos, real drowsiness) | AUC drowsy vs alert video (mean score) | 0.868 | 0.861 |
 | | subjects whose drowsy video scores higher | 12/12 | 12/12 |
 | **NITYMED** (126 night-driving videos) | microsleep videos raising an alarm | 94.7% | 94.7% |
 | | yawns detected per video (3 performed) | 2.34 | 2.34 |
 
-Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same recall) while cutting false alarms by a third at warning level and by half at alarm level. The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms in the data.
+Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same recall) while cutting false alarms by a third at warning level and by half at alarm level; on subjects the smile settings never saw, F1 rises from 76.5% to 82.7%. The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms in the data. The detection delay counts only drowsy episodes that start without an alert already on (23 of 41; the others are continuations of an earlier episode).
 
 **How the settings were checked.** [`tools/replay.py`](tools/replay.py) re-runs everything after face tracking on the recorded signals (it matches the pipeline on 98.6–99.98% of frames), and [`tools/tune_detection.py`](tools/tune_detection.py) scores settings on all datasets. Every change was chosen on part of the data and checked on unseen data:
 
@@ -129,7 +131,7 @@ Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same r
 
 | Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed |
 |---|---|---|---|---|---|
-| **Rule-based adaptive (used)** | **80.9%** | **23.0%** | 0.861 | 8.8% | **94.7%** |
+| **Rule-based adaptive (used)** | **80.9%** | **23.1%** | 0.861 | 12.7% | **94.7%** |
 | Learned on NTHU-DDD, all features | 76.9% | 27.7% | 0.458 | 2.9% | 84.2% |
 | Learned on NTHU-DDD, without smile and conditions | 72.4% | 29.6% | **0.917** | 4.4% | 84.2% |
 | Learned on NTHU-DDD + UTA-RLDD, all features | 77.5% | 30.1% | 0.604 | 5.4% | 100% |

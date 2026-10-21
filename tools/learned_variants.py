@@ -31,10 +31,10 @@ from drowsiness.learned import FEATURES, LogisticModel
 REFERENCE = {
     "variant": "adaptive rules (current)",
     "NTHU F1": 0.809,
-    "NTHU FA": 0.230,
+    "NTHU FA": 0.231,
     "NTHU recall": 0.836,
     "UTA AUC": 0.861,
-    "YawDD awake warned": 0.088,
+    "YawDD awake warned": 0.127,
     "night microsleep alarmed": 0.947,
 }
 ALL = list(range(len(FEATURES)))
