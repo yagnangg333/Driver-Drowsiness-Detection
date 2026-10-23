@@ -2,17 +2,17 @@
 
 Real-time driver drowsiness detection with **condition-aware adaptive signal fusion**, built for the CS801 Computing Lab project (NITK Surathkal) by Yagnang Acharya (262IS037) and Akash Minz (262IS002).
 
-The system tracks the driver's face from a webcam with MediaPipe. It combines three drowsiness cues (eye closure, yawning and head tilt) into one score and raises escalating alerts. The goal of the project is to re-weight those cues when conditions such as low light or glasses make some of them unreliable.
+The system tracks the driver's face from a webcam with MediaPipe. It combines three drowsiness cues (eye closure, yawning and head tilt) into one score and raises escalating alerts. The goal of the project is to adapt how those cues are combined when conditions such as smiling or covered eyes make some of them unreliable, cutting false alarms without missing drowsiness.
 
 > [!WARNING]
-> **This is a prototype built for a course project, not a safety device.** Its detection accuracy (missed drowsiness, false alarms, reaction time) has not been measured yet. All thresholds and weights are untuned starting values. Never rely on it while driving.
+> **This is a prototype built for a course project, not a safety device.** Its accuracy was measured on four public datasets (see [Evaluation results](#evaluation-results)), most of them with acted or per-video-labelled drowsiness, and it has not been tested in a real vehicle. Never rely on it while driving.
 
 ## Status
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Landmark pipeline; EAR, MAR, head pose | Implemented; not yet validated on real data |
-| 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | Implemented; not yet validated on real data |
+| 1 | Landmark pipeline; EAR, MAR, head pose | Done; checked on real footage |
+| 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | Done; evaluated as the baseline |
 | 3 | Condition detection + adaptive (expression-aware) fusion | Implemented, tuned on real footage |
 | 4 | Evaluation vs. static baseline on four public datasets | Done ([results](#evaluation-results)); own clips pending |
 | 5 | Dashboard polish, documentation, final report | Planned (Endsem) |
