@@ -14,6 +14,7 @@ import threading
 import time
 from collections import deque
 
+import altair as alt
 import cv2
 import pandas as pd
 import streamlit as st
@@ -30,9 +31,40 @@ HISTORY_S = 60.0
 PANEL_REFRESH_S = 0.3
 CHART_REFRESH_S = 1.0
 DISCLAIMER = (
-    "Prototype built for a course project, not a safety device. Accuracy has not been "
-    "validated; never rely on it while driving."
+    "Prototype built for a course project, not a safety device. Evaluated on public "
+    "datasets only; never rely on it while driving."
 )
+
+# Background colour of each alert level (white text on top, readable in both themes).
+_LEVEL_COLOURS = {
+    AlertLevel.NONE: "#15803d",
+    AlertLevel.WARNING: "#d97706",
+    AlertLevel.ALARM: "#dc2626",
+    AlertLevel.CRITICAL: "#7f1d1d",
+}
+STATIC_COLOUR = "#9ca3af"
+ADAPTIVE_COLOUR = "#2563eb"
+_LEVEL_NAMES = {
+    AlertLevel.NONE: "Normal",
+    AlertLevel.WARNING: "Warning",
+    AlertLevel.ALARM: "Alarm",
+    AlertLevel.CRITICAL: "CRITICAL",
+}
+
+_CSS = """
+<style>
+.dd-cards {display: flex; gap: 12px; margin: 4px 0 10px 0;}
+.dd-card {flex: 1; border-radius: 10px; padding: 10px 14px; color: #fff;}
+.dd-card .dd-label {font-size: 0.78rem; opacity: 0.9; letter-spacing: 0.02em;}
+.dd-card .dd-level {font-size: 1.55rem; font-weight: 700; line-height: 1.25;}
+.dd-card .dd-score {font-size: 0.85rem; opacity: 0.95;}
+.dd-ours {outline: 3px solid rgba(37, 99, 235, 0.85); outline-offset: 2px;}
+.dd-tiles {display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 6px 0 10px 0;}
+.dd-tile {border: 1px solid rgba(128, 128, 128, 0.35); border-radius: 8px; padding: 6px 10px;}
+.dd-tile .dd-k {font-size: 0.72rem; opacity: 0.7;}
+.dd-tile .dd-v {font-size: 1.15rem; font-weight: 600;}
+</style>
+"""
 
 
 def _base_config() -> AppConfig:
@@ -66,17 +98,19 @@ def _sidebar(config: AppConfig, running: bool) -> tuple[AppConfig, bool]:
         "Calibrate at start",
         value=config.calibration.enabled,
         disabled=running,
-        help="Learn the driver's open-eye EAR and neutral head pose during the first seconds.",
+        help="Learn the driver's open-eye EAR, neutral head pose and resting smile during "
+        "the first seconds.",
     )
 
     strategy = sb.radio(
-        "Fusion",
+        "Alarm driven by",
         ["adaptive", "static"],
         index=["adaptive", "static"].index(config.fusion.strategy),
         format_func={"adaptive": "Adaptive (condition-aware)", "static": "Static (baseline)"}.get,
         disabled=running,
-        help="Adaptive fusion trusts the eye cue less in low light or when the eyes are "
-        "occluded. Both scores are always shown in the chart.",
+        help="Adaptive fusion ignores eye closures while the driver smiles and trusts the "
+        "eyes less when they are covered. Both strategies are always shown side by side; "
+        "this only chooses which one sounds the alarm and is logged.",
     )
 
     with sb.expander("Normal-condition weights"):
@@ -137,18 +171,60 @@ def _status(slot, report: FrameReport) -> None:
         slot.error(f"Level 3 CRITICAL: wake up! (score {report.fusion.score:.2f})")
 
 
+def _card(label: str, level: AlertLevel, score: float, ours: bool = False) -> str:
+    cls = "dd-card dd-ours" if ours else "dd-card"
+    return (
+        f'<div class="{cls}" style="background:{_LEVEL_COLOURS[level]}">'
+        f'<div class="dd-label">{label}</div>'
+        f'<div class="dd-level">{_LEVEL_NAMES[level]}</div>'
+        f'<div class="dd-score">score {score:.2f}</div></div>'
+    )
+
+
+def _compare_cards(report: FrameReport) -> str:
+    """The two strategies' alert levels side by side: the point of the project."""
+    return (
+        '<div class="dd-cards">'
+        + _card("STATIC · fixed weights", report.static_level, report.static_score)
+        + _card("ADAPTIVE · ours", report.adaptive_level, report.adaptive_score, ours=True)
+        + "</div>"
+    )
+
+
+def _tiles(items: list[tuple[str, str]]) -> str:
+    cells = "".join(
+        f'<div class="dd-tile"><div class="dd-k">{k}</div><div class="dd-v">{v}</div></div>'
+        for k, v in items
+    )
+    return f'<div class="dd-tiles">{cells}</div>'
+
+
+def _degrees(angle: float) -> str:
+    rounded = round(angle)
+    return f"{rounded:+d}°" if rounded else "0°"  # no "-0°"
+
+
 def _panel(slot, report: FrameReport) -> None:
     s = report.signals
     pose = s.pose if s else None
     with slot.container():
-        # Two per row, so the values never get cut off in a narrow column.
-        c1, c2 = st.columns(2)
-        c1.metric("EAR", f"{s.ear:.2f}" if s else "-")
-        c2.metric("MAR", f"{s.mar:.2f}" if s else "-")
-        c3, c4 = st.columns(2)
-        c3.metric("Pitch", f"{pose.pitch:+.0f}°" if pose else "-")
-        c4.metric("Roll", f"{pose.roll:+.0f}°" if pose else "-")
+        if not report.calibrating:
+            st.markdown(_compare_cards(report), unsafe_allow_html=True)
+            if report.static_level > report.adaptive_level and report.conditions.smiling:
+                st.caption("Smiling: the static baseline reads the narrowed eyes as closing.")
+        st.markdown(_conditions_badges(report))
 
+        st.markdown(
+            _tiles(
+                [
+                    ("EAR", f"{s.ear:.2f}" if s else "-"),
+                    ("MAR", f"{s.mar:.2f}" if s else "-"),
+                    ("Pitch", _degrees(pose.pitch) if pose else "-"),
+                    ("Roll", _degrees(pose.roll) if pose else "-"),
+                ]
+            ),
+            unsafe_allow_html=True,
+        )
         st.progress(
             report.eye.score,
             text=f"Eye closure {report.eye.score:.2f} "
@@ -159,24 +235,6 @@ def _panel(slot, report: FrameReport) -> None:
             text=f"Yawning {report.yawn.score:.2f} ({report.yawn.yawn_count} recent)",
         )
         st.progress(report.head.score, text=f"Head tilt {report.head.score:.2f}")
-        st.progress(
-            min(report.fusion.score, 1.0),
-            text=f"**Fused drowsiness score {report.fusion.score:.2f}** ({report.fusion_name})",
-        )
-
-        st.markdown(_conditions_badges(report))
-        if not report.calibrating:
-            s1, s2 = st.columns(2)
-            s1.markdown(
-                f"**Static** (fixed weights)  \n{_level_badge(report.static_level)} "
-                f"score {report.static_score:.2f}"
-            )
-            s2.markdown(
-                f"**Adaptive** (ours)  \n{_level_badge(report.adaptive_level)} "
-                f"score {report.adaptive_score:.2f}"
-            )
-            if report.static_level > report.adaptive_level and report.conditions.smiling:
-                st.caption("Smiling: the static baseline reads the narrowed eyes as closing.")
 
         w = report.fusion.weights
         b = report.baseline
@@ -218,6 +276,78 @@ def _conditions_badges(report: FrameReport) -> str:
     return " ".join(badges)
 
 
+def _session_tiles(monitored_s: float, fps: float, events: list[AlertEvent]) -> str:
+    raised = [e for e in events if e.level > e.previous]
+    warnings = sum(e.level == AlertLevel.WARNING for e in raised)
+    alarms = sum(e.level >= AlertLevel.ALARM for e in raised)
+    minutes, seconds = divmod(int(monitored_s), 60)
+    return _tiles(
+        [
+            ("Monitored", f"{minutes}:{seconds:02d}"),
+            ("Frame rate", f"{fps:.0f} fps"),
+            ("Warnings", str(warnings)),
+            ("Alarms", str(alarms)),
+        ]
+    )
+
+
+def _score_chart(history: deque[dict], now: float, thresholds: tuple[float, ...]) -> alt.Chart:
+    """Static vs adaptive score over the last minute, on the alert-level bands."""
+    df = pd.DataFrame(history)
+    df["seconds"] = df["time"] - now
+    long = df.melt(
+        id_vars="seconds",
+        value_vars=["static", "adaptive"],
+        var_name="fusion",
+        value_name="score",
+    )
+    l1, l2, l3 = thresholds
+    bands = pd.DataFrame(
+        {
+            "lo": [l1, l2, l3],
+            "hi": [l2, l3, 1.0],
+            "level": ["Warning", "Alarm", "Critical"],
+        }
+    )
+    band_scale = alt.Scale(
+        domain=["Warning", "Alarm", "Critical"],
+        range=[_LEVEL_COLOURS[AlertLevel(i)] for i in (1, 2, 3)],
+    )
+    x = alt.X("seconds:Q", title="seconds ago", scale=alt.Scale(domain=[-HISTORY_S, 0]))
+    band_layer = (
+        alt.Chart(bands)
+        .mark_rect(opacity=0.16)
+        .encode(
+            y=alt.Y("lo:Q", scale=alt.Scale(domain=[0, 1])),
+            y2="hi:Q",
+            color=alt.Color("level:N", scale=band_scale, legend=None),
+        )
+    )
+    band_labels = (
+        alt.Chart(bands)
+        .mark_text(align="left", baseline="bottom", dx=4, dy=-3, fontSize=11)
+        .encode(
+            x=alt.datum(-HISTORY_S),
+            y="lo:Q",  # just inside the bottom of each band
+            text="level:N",
+            color=alt.Color("level:N", scale=band_scale, legend=None),
+        )
+    )
+    y = alt.Y("score:Q", title="drowsiness score", scale=alt.Scale(domain=[0, 1]))
+    # Colours are set on the marks: Streamlit's chart theme overrides colour scales.
+    static = (
+        alt.Chart(long[long["fusion"] == "static"])
+        .mark_line(strokeWidth=2, strokeDash=[5, 4], color=STATIC_COLOUR)
+        .encode(x=x, y=y)
+    )
+    adaptive = (
+        alt.Chart(long[long["fusion"] == "adaptive"])
+        .mark_line(strokeWidth=2.5, color=ADAPTIVE_COLOUR)
+        .encode(x=x, y=y)
+    )
+    return (band_layer + band_labels + static + adaptive).properties(height=230)
+
+
 def _event_rows(events: list[AlertEvent]) -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -234,10 +364,31 @@ def _event_rows(events: list[AlertEvent]) -> pd.DataFrame:
     )
 
 
+def _guide(slot) -> None:
+    """What to try when detection is stopped (also the live-demo script)."""
+    with slot.container(border=True):
+        st.markdown(
+            "**How it works.** The webcam image goes through MediaPipe's face landmarks. "
+            "Eye closure, yawning and head tilt are fused into one drowsiness score, and "
+            "two strategies run side by side:\n"
+            "- **Static** uses fixed weights.\n"
+            "- **Adaptive** (ours) ignores eye closures while you smile and trusts the "
+            "eyes less when they are covered."
+        )
+        st.markdown(
+            "**Try it.** Turn on *Start detection* and look ahead for 5 s to calibrate. Then:\n"
+            "1. **Smile or laugh.** Static warns, adaptive stays *Normal*.\n"
+            "2. **Close your eyes for 2 s.** Both raise an alarm (microsleep).\n"
+            "3. **Yawn slowly** or **nod forward.** The yawn and head cues rise.\n"
+            "4. **Cover the camera.** The alert escalates after 3 s (face lost)."
+        )
+
+
 def _run(config: AppConfig, slots: dict) -> None:
     from drowsiness.video import VideoSource
 
     alerts = config.alerts
+    thresholds = (alerts.level1_threshold, alerts.level2_threshold, alerts.level3_threshold)
     alarm = _alarm(str(resolve_path(alerts.sound_path)))
     if not alarm.available:
         _alarm.clear()  # retry audio set-up next time (e.g. headphones plugged in)
@@ -248,7 +399,11 @@ def _run(config: AppConfig, slots: dict) -> None:
     st.session_state.log_path = events.path
     history: deque[dict] = deque()
     last_panel = last_chart = 0.0
+    first_t = last_t = None
+    fps = 0.0
     started = False
+    slots["events"].dataframe(_event_rows(events.events), hide_index=True)
+    slots["chart"].caption("The chart starts after calibration.")
 
     try:
         cam = config.camera
@@ -268,15 +423,18 @@ def _run(config: AppConfig, slots: dict) -> None:
                 overlay.draw(frame, report)
                 slots["video"].image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
+                if first_t is None:
+                    first_t = t
+                if last_t is not None and t > last_t:
+                    fps = 0.9 * fps + 0.1 / (t - last_t) if fps else 1.0 / (t - last_t)
+                last_t = t
+
                 if not report.calibrating:
                     history.append(
                         {
                             "time": t,
                             "static": report.static_score,
                             "adaptive": report.adaptive_score,
-                            "eye": report.eye.score,
-                            "yawn": report.yawn.score,
-                            "head": report.head.score,
                         }
                     )
                     while history and t - history[0]["time"] > HISTORY_S:
@@ -286,9 +444,14 @@ def _run(config: AppConfig, slots: dict) -> None:
                 if now - last_panel >= PANEL_REFRESH_S:
                     _status(slots["status"], report)
                     _panel(slots["panel"], report)
+                    slots["session"].markdown(
+                        _session_tiles(t - first_t, fps, events.events), unsafe_allow_html=True
+                    )
                     last_panel = now
                 if history and now - last_chart >= CHART_REFRESH_S:
-                    slots["chart"].line_chart(pd.DataFrame(history).set_index("time"), height=220)
+                    slots["chart"].altair_chart(
+                        _score_chart(history, t, thresholds), use_container_width=True
+                    )
                     last_chart = now
     except Exception as exc:
         # Streamlit stops a run (e.g. the toggle was switched off) by raising its
@@ -316,6 +479,7 @@ def _run(config: AppConfig, slots: dict) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Drowsiness Detection", page_icon="😴", layout="wide")
+    st.markdown(_CSS, unsafe_allow_html=True)
     st.title("Driver Drowsiness Detection")
     st.caption(DISCLAIMER)
 
@@ -331,10 +495,17 @@ def main() -> None:
     video_col, info_col = st.columns([3, 2], gap="large")
     slots = {
         "video": video_col.empty(),
+        "session": video_col.empty(),
         "status": info_col.empty(),
         "panel": info_col.empty(),
     }
-    st.subheader("Drowsiness score (last 60 s)")
+    st.subheader("Drowsiness score, last 60 s")
+    st.markdown(
+        f'<span style="color:{ADAPTIVE_COLOUR}">━━</span> **Adaptive** (ours) &nbsp; '
+        f'<span style="color:{STATIC_COLOUR}">╍╍</span> **Static** (baseline) &nbsp; '
+        "· shaded: warning / alarm / critical",
+        unsafe_allow_html=True,
+    )
     slots["chart"] = st.empty()
     st.subheader("Alert history")
     slots["events"] = st.empty()
@@ -354,7 +525,12 @@ def main() -> None:
         return
 
     slots["status"].info("Detection stopped. Turn on **Start detection** to begin.")
+    _guide(slots["video"])
     events = st.session_state.get("events", [])
+    if events:
+        slots["chart"].caption("The chart shows the live session while detection runs.")
+    else:
+        slots["chart"].caption("Start detection to see the live scores.")
     slots["events"].dataframe(_event_rows(events), hide_index=True)
     log_path = st.session_state.get("log_path")
     if events and log_path and log_path.exists():
