@@ -32,6 +32,9 @@ class Baseline:
     pitch: float = 0.0
     roll: float = 0.0
     calibrated: bool = False
+    # MediaPipe smile score of this driver's resting face: for some faces and
+    # camera angles it is well above zero, so smiling is judged relative to it.
+    smile: float | None = None
 
 
 class Calibrator:
@@ -55,7 +58,9 @@ class Calibrator:
         by_samples = len(self._ears) / self._config.min_samples
         return min(by_time, by_samples, 1.0)
 
-    def update(self, timestamp: float, signals: FaceSignals | None) -> Baseline | None:
+    def update(
+        self, timestamp: float, signals: FaceSignals | None, smile: float | None = None
+    ) -> Baseline | None:
         """Feed one frame; returns the baseline once calibration finishes."""
         if self.done:
             return self.result
@@ -69,6 +74,8 @@ class Calibrator:
             if signals.pose is not None:
                 self._pitches.append(signals.pose.pitch)
                 self._rolls.append(signals.pose.roll)
+            if smile is not None:
+                self._smiles.append(smile)
 
         enough_time = self._elapsed >= self._config.duration_s
         if enough_time and len(self._ears) >= self._config.min_samples:
@@ -93,6 +100,7 @@ class Calibrator:
         self._mars: list[float] = []
         self._pitches: list[float] = []
         self._rolls: list[float] = []
+        self._smiles: list[float] = []
 
     def _finish_attempt(self, timestamp: float) -> None:
         candidate = self._compute()
@@ -143,4 +151,5 @@ class Calibrator:
             pitch=statistics.median(self._pitches) if self._pitches else 0.0,
             roll=statistics.median(self._rolls) if self._rolls else 0.0,
             calibrated=True,
+            smile=statistics.median(self._smiles) if self._smiles else None,
         )

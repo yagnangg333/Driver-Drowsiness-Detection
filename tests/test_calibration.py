@@ -79,3 +79,13 @@ def test_no_face_falls_back_to_defaults():
 def test_disabled_calibration_is_done_immediately():
     cal = Calibrator(CalibrationConfig(enabled=False), default_ear_threshold=0.2)
     assert cal.done and cal.result.ear_threshold == 0.2
+
+
+def test_calibration_records_the_resting_smile():
+    cal = Calibrator(CalibrationConfig(duration_s=1.0, min_samples=5), 0.21)
+    signals = FaceSignals(0.3, 0.3, 0.1, HeadPose(0.0, 0.0, 0.0))
+    t, result = 0.0, None
+    while result is None:
+        result = cal.update(t, signals, smile=0.2)
+        t += 0.1
+    assert result.calibrated and result.smile == 0.2

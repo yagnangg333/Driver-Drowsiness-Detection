@@ -74,6 +74,7 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
         f"Pitch {pose.pitch:+.0f}  Roll {pose.roll:+.0f}" if pose else "Pose --",
         f"Eyes closed {report.eye.perclos * 100:.0f}%",
         _conditions_line(report),
+        f"Static {report.static_level.label} / ours {report.adaptive_level.label}",
     ]
     _panel(frame, (8, 8), (205, 20 + 20 * len(lines) + 3 * 18 + 18))
     y = 28
@@ -93,11 +94,16 @@ def _draw_hud(frame: np.ndarray, report: FrameReport) -> None:
 
 def _conditions_line(report: FrameReport) -> str:
     c = report.conditions
-    if c.normal:
-        return "Cond: normal"
-    return "Cond: " + "+".join(
-        name for name, on in (("low light", c.low_light), ("eyes hidden", c.eye_occluded)) if on
-    )
+    names = [
+        name
+        for name, on in (
+            ("dark", c.low_light),
+            ("covered", c.eye_occluded),
+            ("smile", c.smiling),
+        )
+        if on
+    ]
+    return "Cond: " + ("+".join(names) or "normal")
 
 
 def _draw_banner(frame: np.ndarray, report: FrameReport) -> None:

@@ -216,3 +216,25 @@ def test_a_yawn_is_not_a_smile(detector):
     # ...but a real smile once the mouth has been closed for a while.
     state, _ = _feed(detector, after, 2.0, t)
     assert state.smiling
+
+
+def test_smiling_is_judged_against_the_resting_smile(detector):
+    # A resting face that MediaPipe already scores at 0.25: not a smile for
+    # this driver, but a clearly bigger smile still is.
+    resting = dataclasses.replace(CLEAR, smile=0.25)
+    state, t = None, 0.0
+    for _ in range(30):
+        state = detector.update(t, resting, resting_smile=0.25)
+        t += 1 / FPS
+    assert not state.smiling
+    bigger = dataclasses.replace(CLEAR, smile=0.6)
+    for _ in range(30):
+        state = detector.update(t, bigger, resting_smile=0.25)
+        t += 1 / FPS
+    assert state.smiling
+
+
+def test_no_smile_without_a_face(detector):
+    state, t = _feed(detector, dataclasses.replace(CLEAR, smile=0.6), 1.5, 0.0)
+    assert state.smiling
+    assert not detector.update(t + 5.0, None).smiling

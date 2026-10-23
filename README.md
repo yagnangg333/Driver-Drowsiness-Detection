@@ -2,17 +2,17 @@
 
 Real-time driver drowsiness detection with **condition-aware adaptive signal fusion**, built for the CS801 Computing Lab project (NITK Surathkal) by Yagnang Acharya (262IS037) and Akash Minz (262IS002).
 
-The system tracks the driver's face from a webcam with MediaPipe. It combines three drowsiness cues (eye closure, yawning and head tilt) into one score and raises escalating alerts. The goal of the project is to re-weight those cues when conditions such as low light or glasses make some of them unreliable.
+The system tracks the driver's face from a webcam with MediaPipe. It combines three drowsiness cues (eye closure, yawning and head tilt) into one score and raises escalating alerts. The goal of the project is to adapt how those cues are combined when conditions such as smiling or covered eyes make some of them unreliable, cutting false alarms without missing drowsiness.
 
 > [!WARNING]
-> **This is a prototype built for a course project, not a safety device.** Its detection accuracy (missed drowsiness, false alarms, reaction time) has not been measured yet. All thresholds and weights are untuned starting values. Never rely on it while driving.
+> **This is a prototype built for a course project, not a safety device.** Its accuracy was measured on four public datasets (see [Evaluation results](#evaluation-results)), most of them with acted or per-video-labelled drowsiness, and it has not been tested in a real vehicle. Never rely on it while driving.
 
 ## Status
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Landmark pipeline; EAR, MAR, head pose | Implemented; not yet validated on real data |
-| 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | Implemented; not yet validated on real data |
+| 1 | Landmark pipeline; EAR, MAR, head pose | Done; checked on real footage |
+| 2 | Static-weight fusion, 3-level alerts, dashboard (working demo) | Done; evaluated as the baseline |
 | 3 | Condition detection + adaptive (expression-aware) fusion | Implemented, tuned on real footage |
 | 4 | Evaluation vs. static baseline on four public datasets | Done ([results](#evaluation-results)); own clips pending |
 | 5 | Dashboard polish, documentation, final report | Planned (Endsem) |
@@ -53,7 +53,7 @@ flowchart LR
 5. **Conditions.** Every frame is checked for conditions that can mislead the eye cue:
    - **Low light:** the mean brightness (0–255) of the **whole frame** is below 76. Cameras brighten dark scenes automatically, so at night the driver's face still looks normally lit (median 80 in real night footage), but the frame as a whole stays dark (median 52) because of the dark car and road.
    - **Eye occlusion:** the eyes cannot be seen at all. A frame counts as occluded if there is glare on ≥ 15% of an eye region, the eye region is almost flat compared with the rest of the face (contrast ratio < 0.05: dark lenses, a hand), or the two eyes read very differently while the head faces ahead and at least one eye is clearly open (one eye hidden). Clear glasses do not count, closing both eyes never counts, and lightly tinted sunglasses are deliberately not flagged: the landmarks read the eyes through them as well as through clear glasses.
-   - **Smiling:** MediaPipe's smile score (mean of `mouthSmileLeft/Right`, averaged over 1 s) above 0.10. Smiling and laughing narrow the eyes without drowsiness; on NTHU-DDD they caused most false eye closures. A wide-open mouth (MAR > 0.45 in the last 2 s) is a yawn, not a smile, even though MediaPipe scores 36–54% of yawn frames as smiles.
+   - **Smiling:** MediaPipe's smile score (mean of `mouthSmileLeft/Right`, averaged over 1 s) above 0.10 **and** at least 0.10 above the driver's resting smile, measured during calibration. Smiling and laughing narrow the eyes without drowsiness; on NTHU-DDD they caused most false eye closures. The resting-smile margin matters for safety: some faces and camera angles score above 0.10 at rest (without it, 21 of 105 YawDD normal-driving clips read as "smiling" most of the time, so those drivers' eye closures would have been ignored; with it, 5). A wide-open mouth (MAR above the yawn threshold in the last 2 s) is a yawn, not a smile, even though MediaPipe scores 36–54% of yawn frames as smiles.
 
    Both are smoothed over about 1 s with a time-based exponential moving average and have separate enter and exit thresholds (low light starts below 76 and ends above 84), so a passing shadow or reflection does not switch them.
 
@@ -77,7 +77,7 @@ flowchart LR
    | Low light | 0.50 | 0.20 | 0.30 |
    | Eye region occluded | 0.20 | 0.35 | 0.45 |
 
-   **Why low light no longer changes the weights.** The original plan lowered the eye weight in low light. Real night driving (NITYMED) showed the eye cue stays reliable there: eye-measurement noise was 0.8% at night against 0.7% by day, and night "eyes closed" readings were real closures on inspection. Lowering the eye weight only discarded evidence (night microsleep videos raising an alarm fell from 94.7% to 84.2%). Low light is still detected, shown and logged.
+   **Why low light no longer changes the weights.** The original plan lowered the eye weight in low light. Real night driving (NITYMED) showed the eye cue stays reliable there: eye-measurement noise was 0.8% at night against 0.7% by day, and night "eyes closed" readings were real closures on inspection. Lowering the eye weight only discarded evidence (night microsleep videos raising an alarm fell from 94.7% to 84.2%). Low light is still detected, shown and logged, and keeps whatever the normal weights are; `fusion.adapt_to_low_light = true` switches to the original low-light weights (0.20 / 0.35 / 0.45).
 
    With several conditions, each cue gets its lowest weight before normalising. Weights move to new values over 1 s instead of jumping. A microsleep still forces an alarm in every condition: under occlusion the eye weight (0.2) is below the warning threshold (0.25), so without that rule a real microsleep behind glare would raise no alert at all.
 7. **Alerts:**
@@ -106,24 +106,37 @@ Phase 4 ran the full pipeline over four public datasets (489 recordings, about 6
 | Dataset | What it measures | Static | Adaptive |
 |---|---|---|---|
 | **NTHU-DDD** (18,000 labelled frames, 4 subjects) | F1 at warning / alarm level | 76.6% / 71.8% | **80.9% / 76.4%** |
-| | false-alarm rate at warning / alarm level | 34.8% / 22.4% | **23.0% / 10.7%** |
+| | false-alarm rate at warning / alarm level | 34.8% / 22.4% | **23.1% / 10.7%** |
 | | recall (warning level) | 83.6% | 83.6% |
 | | ROC-AUC of the fused score | 0.823 | **0.883** |
-| **YawDD** (320 day-driving clips) | talking clips with a (false) warning | 33–36% | **9–12%** |
-| | normal-driving clips with a (false) warning | 12–14% | **9–10%** |
+| | **held out:** F1 / false alarms, smile settings chosen without the scored subject | 76.5% / 35.0% | **82.7% / 18.4%** |
+| | drowsy episodes detected / median delay | 82.6% / 1.6 s | 82.6% / 1.6 s |
+| **YawDD** (320 day-driving clips) | talking clips with a (false) warning | 31% | **16%** |
+| | normal-driving clips with a (false) warning | 11.4% | **9.5%** |
 | | yawning clips with a yawn detected | 68–77% | 68–77% |
 | **UTA-RLDD** (36 ten-minute videos, real drowsiness) | AUC drowsy vs alert video (mean score) | 0.868 | 0.861 |
 | | subjects whose drowsy video scores higher | 12/12 | 12/12 |
 | **NITYMED** (126 night-driving videos) | microsleep videos raising an alarm | 94.7% | 94.7% |
 | | yawns detected per video (3 performed) | 2.34 | 2.34 |
 
-Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same recall) while cutting false alarms by a third at warning level and by half at alarm level. The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms in the data.
+Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same recall) while cutting false alarms by a third at warning level and by half at alarm level; on subjects the smile settings never saw, F1 rises from 76.5% to 82.7%. The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms in the data. The detection delay counts only drowsy episodes that start without an alert already on (23 of 41; the others are continuations of an earlier episode).
 
 **How the settings were checked.** [`tools/replay.py`](tools/replay.py) re-runs everything after face tracking on the recorded signals (it matches the pipeline on 98.6–99.98% of frames), and [`tools/tune_detection.py`](tools/tune_detection.py) scores settings on all datasets. Every change was chosen on part of the data and checked on unseen data:
 
 - The smile rule, tested leave-one-subject-out on NTHU-DDD, helps every subject (mean held-out F1 74.4% → 78.3%, false alarms 32.5% → 19.7%, recall unchanged).
 - The yawn rule (MAR > 0.45 for 1.0 s instead of 0.5 for 1.5 s) was chosen on half of the YawDD drivers: yawns caught on the other half 56% → 69%, with one false yawn in about 50 talking clips; on NITYMED, 1.76 → 2.34 of 3 yawns per video.
 - Rejected because they did not hold on unseen subjects: other eye-closure thresholds, a shorter or warm-up PERCLOS window, longer microsleep time, ignoring closures while the mouth stretches, letting the eye score alone raise alarms ("peak fusion", which raised false warnings on awake drivers from 23% to 41% of clips) and counting backward head tilts.
+
+**Learned fusion (tried, not adopted).** We also trained a logistic regression on 13 windowed features (eye-closure fractions, closure length, blinks, relative EAR, yawn and head scores, mouth opening, nodding, smile, conditions) instead of hand-set weights ([`learned.py`](src/drowsiness/learned.py), [`tools/learned_fusion.py`](tools/learned_fusion.py), [`tools/learned_variants.py`](tools/learned_variants.py)). Every subject was predicted by a model that never saw them. No variant beat the rule-based adaptive fusion overall:
+
+| Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed |
+|---|---|---|---|---|---|
+| **Rule-based adaptive (used)** | **80.9%** | **23.1%** | 0.861 | 12.7% | **94.7%** |
+| Learned on NTHU-DDD, all features | 76.9% | 27.7% | 0.458 | 2.9% | 84.2% |
+| Learned on NTHU-DDD, without smile and conditions | 72.4% | 29.6% | **0.917** | 4.4% | 84.2% |
+| Learned on NTHU-DDD + UTA-RLDD, all features | 77.5% | 30.1% | 0.604 | 5.4% | 100% |
+
+With four acted subjects the model learned the training set's habits (its largest weight said "smiling means alert") and did not transfer to real tiredness; each variant won on one dataset and lost on others. The safety rules (microsleep and face loss) stay in the alert manager in every variant.
 
 **Limitations of the evaluation.** NTHU-DDD (Kaggle copy) has four subjects and acted drowsiness; UTA-RLDD and NITYMED have only per-video labels; no public dataset has dark sunglasses or hands over the eyes with drowsiness labels, so those cases are tested only with simulated frames. Processing times in the tables are with six recordings processed in parallel; live, the pipeline needs about 10–15 ms per frame.
 
@@ -180,6 +193,7 @@ src/drowsiness/
   indicators.py    closed-eye ratio/microsleep, yawn, head-tilt scores
   conditions.py    low-light and eye-occlusion detection
   fusion.py        StaticFusion baseline + AdaptiveFusion
+  learned.py       learned fusion (evaluated, not used live)
   alerts.py        3-level alert state machine + CSV event log
   audio.py         alarm sound (pygame)
   pipeline.py      per-frame orchestration -> FrameReport
@@ -189,7 +203,7 @@ src/drowsiness/
   cli.py           command-line interface
   dashboard.py     Streamlit dashboard
 tests/             unit tests + end-to-end tests on real frames
-tools/             evaluation, offline replay and tuning on the datasets (needs data/)
+tools/             evaluation, offline replay, tuning and learned fusion (needs data/)
 configs/           default configuration
 models/            MediaPipe face landmarker model
 assets/            alarm sound, reference images
@@ -205,7 +219,7 @@ ruff format src tests        # format
 
 GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `main` and every pull request.
 
-The tests cover the signal maths, timing logic, alerts (including face loss and microsleep), condition detection and adaptive fusion, calibration rejection, config validation, camera dropouts, audio, the CLI and a dashboard smoke test. End-to-end tests run the real model on two recorded frames (and on copies with simulated low light, dark glasses, glare and a hand over one eye), and head-pose signs are checked against real face geometry. They check that the code behaves as designed. They don't measure detection accuracy; that needs labelled video (Phase 4).
+The tests cover the signal maths, timing logic, alerts (including face loss and microsleep), condition detection and adaptive fusion, calibration rejection, config validation, camera dropouts, audio, the CLI and a dashboard smoke test. End-to-end tests run the real model on two recorded frames (and on copies with simulated low light, dark glasses, glare and a hand over one eye), and head-pose signs are checked against real face geometry. They check that the code behaves as designed; detection accuracy is measured separately on public datasets (see [Evaluation results](#evaluation-results)).
 
 ## Tuning tips
 

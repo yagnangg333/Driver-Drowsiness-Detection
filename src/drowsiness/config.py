@@ -200,16 +200,20 @@ class ConditionConfig:
     # Expression: smiling and laughing narrow the eyes without drowsiness; on
     # NTHU-DDD they caused most false eye closures. While MediaPipe's smile
     # score (mean of mouthSmileLeft/Right) averaged over ``smile_window_s``
-    # exceeds ``smile_threshold``, the adaptive strategy does not count eye
-    # closures. Real drowsy closures had smile <= 0.003 (90th percentile).
+    # exceeds ``smile_threshold`` and the driver's calibrated resting smile by
+    # ``smile_margin``, the adaptive strategy does not count eye closures.
+    # Real drowsy closures had smile <= 0.003 (90th percentile). The margin
+    # matters: some resting faces score well above 0.10 (21 of 105 YawDD
+    # normal-driving clips read as smiling most of the time without it), and
+    # for those drivers eye closures would otherwise be ignored.
     smile_threshold: float = 0.10
+    smile_margin: float = 0.10
     smile_window_s: float = 1.0
     # A yawn stretches the mouth and MediaPipe reads part of it as a smile
     # (36-54% of wide-open-mouth frames on NITYMED and YawDD), which hid the
     # eye closures that come with yawning. So a smile does not count while the
-    # mouth has been wide open (MAR above ``smile_max_mar``, the yawn
-    # threshold) within the last ``smile_yawn_guard_s``.
-    smile_max_mar: float = 0.45
+    # mouth has been wide open (MAR above the yawn threshold,
+    # indicators.yawn_mar_threshold) within the last ``smile_yawn_guard_s``.
     smile_yawn_guard_s: float = 2.0
     # If true, a microsleep does not force an alarm on its own while the eyes are
     # occluded (glare can make open eyes read as closed). Off by default: the eye
@@ -233,10 +237,8 @@ class ConditionConfig:
             "asymmetry_min_open_ear",
             "smoothing_s",
         )
-        _require_fraction("conditions", self, "smile_threshold")
-        _require_positive(
-            "conditions", self, "smile_window_s", "smile_max_mar", "smile_yawn_guard_s"
-        )
+        _require_fraction("conditions", self, "smile_threshold", "smile_margin")
+        _require_positive("conditions", self, "smile_window_s", "smile_yawn_guard_s")
         _require(
             0 <= self.occlusion_exit < self.occlusion_enter <= 1,
             "conditions: need 0 <= occlusion_exit < occlusion_enter <= 1",
@@ -260,14 +262,16 @@ class FusionConfig:
     eye_weight: float = 0.5
     yawn_weight: float = 0.2
     head_weight: float = 0.3
-    # Low light: the same as normal. On real night driving (NITYMED) the eye
-    # measurements were as precise as by day (EAR noise 0.8% vs 0.7%) and eye
-    # closures read at night were real, so lowering the eye weight there only
-    # discarded good evidence (night microsleep videos with an alarm: 94.7%
-    # static vs 84.2% with eye weight 0.2). Low light is still detected and shown.
-    low_light_eye_weight: float = 0.5
-    low_light_yawn_weight: float = 0.2
-    low_light_head_weight: float = 0.3
+    # Low light. On real night driving (NITYMED) the eye measurements were as
+    # precise as by day (EAR noise 0.8% vs 0.7%) and eye closures read at night
+    # were real, so lowering the eye weight there only discarded good evidence
+    # (night microsleep videos with an alarm: 94.7% static vs 84.2% with eye
+    # weight 0.2). So by default low light keeps the normal weights (it is still
+    # detected and shown); ``adapt_to_low_light`` switches to the weights below.
+    adapt_to_low_light: bool = False
+    low_light_eye_weight: float = 0.2
+    low_light_yawn_weight: float = 0.35
+    low_light_head_weight: float = 0.45
     # Eye region occluded (glare, dark glasses, hand).
     occluded_eye_weight: float = 0.2
     occluded_yawn_weight: float = 0.35

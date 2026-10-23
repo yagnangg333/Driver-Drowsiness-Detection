@@ -58,8 +58,8 @@ def load(dataset: str) -> list[pd.DataFrame]:
     return out
 
 
-def baseline(df: pd.DataFrame, config: AppConfig) -> tuple[float, float, float]:
-    """(EAR threshold, neutral pitch, neutral roll) as calibration would set them."""
+def _calibration_frames(df: pd.DataFrame, config: AppConfig) -> pd.DataFrame:
+    """The frames calibration would have used, with a face."""
     cal = config.calibration
     if "behaviour" in df:
         # NTHU: calibrated on the start of the subject's non-sleepy recording.
@@ -72,7 +72,21 @@ def baseline(df: pd.DataFrame, config: AppConfig) -> tuple[float, float, float]:
             src = df.head(50)
     else:
         src = df[df["calibrating"] == 1]
-    src = src[src["face_detected"] == 1]
+    return src[src["face_detected"] == 1]
+
+
+def resting_smile(df: pd.DataFrame, config: AppConfig) -> float | None:
+    """The driver's calibrated resting smile score, as the pipeline records it."""
+    src = _calibration_frames(df, config)
+    if len(src) < 5 or "bs_mouthSmile" not in src or src["bs_mouthSmile"].isna().all():
+        return None
+    return float(src["bs_mouthSmile"].median())
+
+
+def baseline(df: pd.DataFrame, config: AppConfig) -> tuple[float, float, float]:
+    """(EAR threshold, neutral pitch, neutral roll) as calibration would set them."""
+    cal = config.calibration
+    src = _calibration_frames(df, config)
     if len(src) < 5:
         return config.indicators.default_ear_threshold, 0.0, 0.0
     ear = float(src["ear"].median())
@@ -122,10 +136,14 @@ def simulate(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
         smiling = np.asarray(settings.smiling_rule(df, cfg), bool)
     else:
         cond = cfg.conditions
-        smiling = smile_mean(df, cond.smile_window_s) > cond.smile_threshold
+        rest = df.attrs.get("resting_smile", resting_smile(df, cfg))
+        threshold = cond.smile_threshold
+        if rest is not None:
+            threshold = max(threshold, rest + cond.smile_margin)
+        smiling = smile_mean(df, cond.smile_window_s) > threshold
         wide = df.set_index(pd.to_datetime(df["timestamp_s"], unit="s"))["mar"].fillna(0)
         recent_max = wide.rolling(f"{int(cond.smile_yawn_guard_s * 1000)}ms").max().to_numpy()
-        smiling &= recent_max <= cond.smile_max_mar
+        smiling &= recent_max <= ind.yawn_mar_threshold
     extra = (
         np.asarray(settings.ignore_closure(df), bool)
         if settings.ignore_closure is not None
@@ -177,7 +195,13 @@ def simulate(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
         yawning[i] = yawn.state.yawning
 
     out = pd.DataFrame(
-        {"static_score": s_score, "adaptive_score": a_score, "yawning": yawning}, index=df.index
+        {
+            "static_score": s_score,
+            "adaptive_score": a_score,
+            "yawning": yawning,
+            "smiling": smiling,
+        },
+        index=df.index,
     )
     face = df["face_detected"].astype(bool)
     calib = df["calibrating"].astype(bool)
@@ -193,10 +217,12 @@ def with_nthu_baselines(recordings: list[pd.DataFrame], config: AppConfig) -> No
     by_subject = {}
     for df in recordings:
         if "behaviour" in df and df["behaviour"].iloc[0] == "nonsleepyCombination":
-            by_subject[df["recording"].iloc[0]] = baseline(df, config)
+            by_subject[df["recording"].iloc[0]] = (baseline(df, config), resting_smile(df, config))
     for df in recordings:
         if "behaviour" in df:
-            df.attrs["baseline"] = by_subject.get(df["recording"].iloc[0])
+            base, smile = by_subject.get(df["recording"].iloc[0], (None, None))
+            df.attrs["baseline"] = base
+            df.attrs["resting_smile"] = smile
 
 
 def configure(config: AppConfig, **sections: dict) -> AppConfig:

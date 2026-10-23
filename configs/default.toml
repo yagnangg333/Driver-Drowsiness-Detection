@@ -68,9 +68,12 @@ occlusion_enter = 0.6               # share of recent frames occluded to start..
 occlusion_exit = 0.3                # ...and to end the condition
 smoothing_s = 1.0                   # time constant of the moving averages
 smile_threshold = 0.10              # MediaPipe smile score (1 s mean) above this:
-smile_window_s = 1.0                # eye closures are not counted (adaptive only)...
-smile_max_mar = 0.45                # ...unless the mouth was this wide open (a yawn,
-smile_yawn_guard_s = 2.0            # which MediaPipe partly reads as a smile) lately
+smile_margin = 0.10                 # ...and this far above the driver's calibrated
+                                    # resting smile: eye closures are not counted
+smile_window_s = 1.0                # (adaptive only)
+smile_yawn_guard_s = 2.0            # not a smile if the mouth was wider than the yawn
+                                    # threshold this recently (MediaPipe reads yawns
+                                    # partly as smiles)
 microsleep_needs_visible_eyes = false  # true: with eyes occluded a microsleep no
                                        # longer forces an alarm on its own (fewer
                                        # glare false alarms, but a real microsleep
@@ -82,11 +85,13 @@ strategy = "adaptive"               # "adaptive" or "static" (fixed weights, bas
 eye_weight = 0.5
 yawn_weight = 0.2
 head_weight = 0.3
-# Low light: same as normal. On real night footage the eye cue was as precise
-# as by day, so lowering its weight only discarded real eye closures.
-low_light_eye_weight = 0.5
-low_light_yawn_weight = 0.2
-low_light_head_weight = 0.3
+# Low light: by default the weights stay normal. On real night footage the eye
+# cue was as precise as by day, so lowering its weight only discarded real eye
+# closures. Set adapt_to_low_light = true to use the weights below instead.
+adapt_to_low_light = false
+low_light_eye_weight = 0.2
+low_light_yawn_weight = 0.35
+low_light_head_weight = 0.45
 # Eye region occluded (glare, dark glasses, hand)
 occluded_eye_weight = 0.2
 occluded_yawn_weight = 0.35

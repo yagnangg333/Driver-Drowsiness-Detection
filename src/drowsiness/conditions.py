@@ -19,6 +19,7 @@ adaptive fusion which cues to trust.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections import deque
 from dataclasses import dataclass
@@ -163,8 +164,10 @@ class ConditionDetector:
     missing nothing can be measured and the last conditions are kept.
     """
 
-    def __init__(self, config: ConditionConfig):
+    def __init__(self, config: ConditionConfig, yawn_mar_threshold: float = 0.45):
         self._config = config
+        # A mouth opened wider than a yawn's threshold is a yawn, not a smile.
+        self._yawn_mar = yawn_mar_threshold
         self.reset()
 
     def reset(self) -> None:
@@ -175,8 +178,15 @@ class ConditionDetector:
         self._mouth_wide_at: float | None = None
         self.state = NORMAL
 
-    def update(self, t: float, frame: FrameConditions | None) -> Conditions:
+    def update(
+        self, t: float, frame: FrameConditions | None, resting_smile: float | None = None
+    ) -> Conditions:
+        """``resting_smile`` is the driver's calibrated smile score, if known."""
         if frame is None:
+            # Nothing to measure: keep the scene conditions, but an expression
+            # cannot be seen on a face that is not there.
+            if self.state.smiling:
+                self.state = dataclasses.replace(self.state, smiling=False)
             return self.state
         cfg = self._config
         reasons = frame.occlusion_reasons(cfg)
@@ -211,7 +221,7 @@ class ConditionDetector:
             self._smiles.popleft()
         smile = sum(s for _, s in self._smiles) / len(self._smiles)
         # A wide-open mouth is a yawn, not a smile, even if MediaPipe scores it so.
-        if frame.mar > cfg.smile_max_mar:
+        if frame.mar > self._yawn_mar:
             self._mouth_wide_at = t
         yawning = (
             self._mouth_wide_at is not None and t - self._mouth_wide_at <= cfg.smile_yawn_guard_s
@@ -227,7 +237,13 @@ class ConditionDetector:
             brightness=self._brightness,
             occlusion=self._occlusion,
             reasons=reasons if occluded else (),
-            smiling=smile > cfg.smile_threshold and not yawning,
+            smiling=smile > self._smile_threshold(resting_smile) and not yawning,
             smile=smile,
         )
         return self.state
+
+    def _smile_threshold(self, resting_smile: float | None) -> float:
+        cfg = self._config
+        if resting_smile is None:
+            return cfg.smile_threshold
+        return max(cfg.smile_threshold, resting_smile + cfg.smile_margin)

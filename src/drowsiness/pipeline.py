@@ -69,6 +69,10 @@ class FrameReport:
     # ignores closures while the driver smiles.
     eye_static: EyeState
     eye_adaptive: EyeState
+    # The alert level each strategy would raise right now; ``alert_level`` is
+    # the one of the strategy that drives the alarm.
+    static_level: AlertLevel = AlertLevel.NONE
+    adaptive_level: AlertLevel = AlertLevel.NONE
 
     @property
     def face_detected(self) -> bool:
@@ -129,6 +133,8 @@ class FrameReport:
             "fusion": self.fusion_name,
             "fused_score": self.fusion.score,
             "alert_level": int(self.alert_level),
+            "static_level": int(self.static_level),
+            "adaptive_level": int(self.adaptive_level),
         }
 
 
@@ -148,7 +154,9 @@ class DrowsinessPipeline:
         self._adaptive = AdaptiveFusion(config.fusion)
         default = self._adaptive if config.fusion.strategy == "adaptive" else self._static
         self.fusion: FusionStrategy = fusion or default
-        self._conditions = ConditionDetector(config.conditions)
+        self._conditions = ConditionDetector(
+            config.conditions, config.indicators.yawn_mar_threshold
+        )
 
         ind = config.indicators
         eye_args = (ind.perclos_window_s, ind.perclos_max, ind.microsleep_s, ind.closure_debounce_s)
@@ -167,7 +175,12 @@ class DrowsinessPipeline:
             ind.head_tilt_max_s,
             ind.head_debounce_s,
         )
-        self.alerts = AlertManager(config.alerts)
+        # One alert state machine per strategy, so the dashboard can show what
+        # the static baseline would do next to the adaptive strategy. Only the
+        # active one (``alerts``) sounds the alarm and is logged.
+        self._static_alerts = AlertManager(config.alerts)
+        self._adaptive_alerts = AlertManager(config.alerts)
+        self.alerts = self._static_alerts if self.fusion is self._static else self._adaptive_alerts
         self.recalibrate()
 
     @property
@@ -192,7 +205,8 @@ class DrowsinessPipeline:
         for fusion in (self._static, self._adaptive, self.fusion):
             fusion.reset()
         self._conditions.reset()
-        self.alerts.reset()
+        self._static_alerts.reset()
+        self._adaptive_alerts.reset()
         self._face_missing_since: float | None = None
 
     def process(self, frame_bgr: np.ndarray, timestamp: float) -> FrameReport:
@@ -203,11 +217,14 @@ class DrowsinessPipeline:
             if face is not None and signals is not None
             else None
         )
-        conditions = self._conditions.update(timestamp, measured)
+        baseline = self._calibrator.result
+        conditions = self._conditions.update(
+            timestamp, measured, baseline.smile if baseline else None
+        )
 
         calibrating = not self._calibrator.done
         if calibrating:
-            self._calibrator.update(timestamp, signals)
+            self._calibrator.update(timestamp, signals, measured.smile if measured else None)
         elif signals is not None:
             self._face_missing_since = None
             self._update_indicators(timestamp, signals, self._calibrator.result, conditions)
@@ -232,12 +249,20 @@ class DrowsinessPipeline:
 
         # Optionally, a microsleep behind an occlusion does not force an alarm on
         # its own (off by default: see ConditionConfig).
-        microsleep = eye.microsleep and not (
-            conditions.eye_occluded and self.config.conditions.microsleep_needs_visible_eyes
-        )
+        gate = conditions.eye_occluded and self.config.conditions.microsleep_needs_visible_eyes
         event = None
         if not calibrating:
-            event = self.alerts.update(timestamp, fusion.score, face is not None, microsleep)
+            face_seen = face is not None
+            static_event = self._static_alerts.update(
+                timestamp, static.score, face_seen, self._eye_static.state.microsleep
+            )
+            adaptive_event = self._adaptive_alerts.update(
+                timestamp,
+                fusion.score if self.fusion is not self._static else adaptive.score,
+                face_seen,
+                self._eye_adaptive.state.microsleep and not gate,
+            )
+            event = static_event if self.alerts is self._static_alerts else adaptive_event
 
         return FrameReport(
             timestamp=timestamp,
@@ -259,6 +284,8 @@ class DrowsinessPipeline:
             event=event,
             eye_static=self._eye_static.state,
             eye_adaptive=self._eye_adaptive.state,
+            static_level=self._static_alerts.level,
+            adaptive_level=self._adaptive_alerts.level,
         )
 
     @property
