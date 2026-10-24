@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from drowsiness.learned import FEATURES, FeatureTracker, LiveLearnedFusion, LogisticModel
+from drowsiness.fusion.learned import FEATURES, FeatureTracker, LiveLearnedFusion, LogisticModel
 
 FPS = 10
 
@@ -105,7 +105,7 @@ def test_threshold_and_training_note_are_saved(tmp_path):
 
 def _report(t, *, calibrating=False, closed=False, smile=0.0):
     from drowsiness.calibration import Baseline
-    from drowsiness.conditions import Conditions
+    from drowsiness.fusion.adaptive.conditions import Conditions
     from drowsiness.indicators import EyeState
 
     signals = SimpleNamespace(ear=0.1 if closed else 0.3, mar=0.1, pose=SimpleNamespace(pitch=0.0))

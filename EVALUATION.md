@@ -32,7 +32,7 @@ Four public datasets, 489 recordings and about 630,000 frames. They are not in t
 - **Detection delay.** Time from the start of a labelled drowsy episode to the first alert. Only episodes that start without an alert already on are counted (23 of 41); the others are continuations of an earlier episode.
 - **Clip and video level.** YawDD: the share of clips with a warning. UTA-RLDD: AUC of each video's mean score, drowsy vs alert. NITYMED: the share of microsleep videos raising an alarm, and yawns detected per video.
 - **Held-out validation.** Every setting was chosen on part of the data and checked on data it was not chosen on: leave-one-subject-out on NTHU-DDD (chosen on 3 subjects, scored on the 4th, predictions pooled), or half of the drivers or videos elsewhere. Splits are always by subject or video, never by frame, because neighbouring frames are nearly identical.
-- **Offline replay.** [`tools/replay.py`](tools/replay.py) re-runs everything after face tracking on the recorded signals, in seconds instead of hours. It matches the real pipeline on 98.6–99.98% of frames. Candidate settings were explored with it. The final results come from the real pipeline, except the **held-out** results and the **learned-fusion** comparison: these need different settings or models for each held-out subject, so they are computed with the simulator on the recorded signals (see [where each number comes from](#where-each-number-comes-from)).
+- **Offline replay.** [`tools/replay.py`](tools/replay.py) re-runs everything after face tracking on the recorded signals, in seconds instead of hours. It matches the real pipeline on 98.4–99.98% of frames. Candidate settings were explored with it. The final results come from the real pipeline, except the **held-out** results and the **learned-fusion** comparison: these need different settings or models for each held-out subject, so they are computed with the simulator on the recorded signals (see [where each number comes from](#where-each-number-comes-from)).
 
 ## Results
 
@@ -101,7 +101,7 @@ The occlusion check was tuned to flag at most 3% of single frames of uncovered e
 
 ## Learned fusion
 
-A logistic regression on 13 windowed features (eye-closure fractions, closure length, blinks, relative EAR, yawn and head scores, mouth opening, nodding, smile, conditions) was trained instead of hand-set weights ([`learned.py`](src/drowsiness/learned.py), [`tools/learned_fusion.py`](tools/learned_fusion.py), [`tools/learned_variants.py`](tools/learned_variants.py)). Every subject was predicted by a model that never saw them. No variant beat the rule-based adaptive fusion overall:
+A logistic regression on 13 windowed features (eye-closure fractions, closure length, blinks, relative EAR, yawn and head scores, mouth opening, nodding, smile, conditions) was trained instead of hand-set weights ([`fusion/learned/`](src/drowsiness/fusion/learned), [`tools/learned_fusion.py`](tools/learned_fusion.py), [`tools/learned_variants.py`](tools/learned_variants.py)). Every subject was predicted by a model that never saw them. No variant beat the rule-based adaptive fusion overall:
 
 | Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed |
 |---|---|---|---|---|---|

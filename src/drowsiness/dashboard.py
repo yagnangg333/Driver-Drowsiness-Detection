@@ -23,7 +23,7 @@ from drowsiness import overlay
 from drowsiness.alerts import AlertEvent, AlertLevel, EventLog
 from drowsiness.audio import AlarmPlayer
 from drowsiness.config import AppConfig, ConfigError, load_config, resolve_path
-from drowsiness.learned import FEATURE_LABELS, LiveLearnedFusion, LogisticModel
+from drowsiness.fusion.learned import FEATURE_LABELS, LiveLearnedFusion, LogisticModel
 from drowsiness.pipeline import DrowsinessPipeline, FrameReport
 
 log = logging.getLogger(__name__)

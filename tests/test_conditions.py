@@ -4,7 +4,8 @@ import cv2
 import numpy as np
 import pytest
 
-from drowsiness.conditions import (
+from drowsiness.config import ConditionConfig
+from drowsiness.fusion.adaptive.conditions import (
     LEFT_EYE_CONTOUR,
     RIGHT_EYE_CONTOUR,
     ConditionDetector,
@@ -12,7 +13,6 @@ from drowsiness.conditions import (
     ear_asymmetry,
     measure,
 )
-from drowsiness.config import ConditionConfig
 from drowsiness.landmarks import FaceLandmarker
 from drowsiness.signals import FaceSignals, HeadPose, compute_signals
 
