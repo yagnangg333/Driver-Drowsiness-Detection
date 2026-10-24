@@ -94,13 +94,13 @@ Evaluated on four public datasets (489 recordings, about 630,000 frames), with b
 |---|---|---|---|
 | **NTHU-DDD** (frame labels) | F1, warning / alarm level | 76.6% / 71.8% | **80.9% / 76.4%** |
 | | false-alarm rate, warning / alarm level | 34.8% / 22.4% | **23.1% / 10.7%** |
-| | recall | 83.6% | 83.6% |
+| | recall, warning / alarm level | 83.6% / 68.5% | 83.6% / 68.5% |
 | | **held out** (unseen subjects): F1 / false alarms | 76.5% / 35.0% | **82.7% / 18.4%** |
 | **YawDD** | talking clips with a false warning | 31% | **16%** |
 | **UTA-RLDD** (real tiredness) | subjects whose drowsy video scores higher | 12/12 | 12/12 |
-| **NITYMED** (night driving) | microsleep videos raising an alarm | 94.7% | 94.7% |
+| **NITYMED** (night driving) | microsleep videos raising an alarm | 94.7% (18/19) | 94.7% (18/19) |
 
-The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms. A trained logistic-regression fusion was also evaluated and did not beat the rules on unseen subjects; the dashboard shows it live for comparison. Full results, method, findings and limitations: **[EVALUATION.md](EVALUATION.md)**.
+The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms. A trained logistic-regression fusion was also evaluated and did not beat the rules on unseen subjects; the dashboard shows it live for comparison. Where each number comes from (dataset, split, definition, script), full results, findings and limitations: **[EVALUATION.md](EVALUATION.md)**.
 
 ## Usage
 
