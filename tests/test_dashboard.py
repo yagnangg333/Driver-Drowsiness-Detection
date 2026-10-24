@@ -15,6 +15,7 @@ def test_dashboard_renders_with_disclaimer():
     assert app.title[0].value == "Driver Drowsiness Detection"
     assert any("not a safety device" in c.value for c in app.caption)
     assert any("Detection stopped" in i.value for i in app.info)
+    assert any("Trained model" in h.value for h in app.subheader)
 
 
 def test_invalid_settings_disable_start():

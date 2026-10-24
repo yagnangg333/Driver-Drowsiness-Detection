@@ -138,6 +138,8 @@ Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same r
 
 With four acted subjects the model learned the training set's habits (its largest weight said "smiling means alert") and did not transfer to real tiredness; each variant won on one dataset and lost on others. The safety rules (microsleep and face loss) stay in the alert manager in every variant.
 
+The dashboard runs the trained model live next to the two rule-based strategies, for comparison only (it never drives the alarm), and shows how it was trained, its learned weights and the table above. The model is [`models/learned_fusion.json`](models/learned_fusion.json) (the "NTHU-DDD, all features" variant, 0.07 ms per frame); `python tools/learned_variants.py --save models/learned_fusion.json` retrains it from the evaluation outputs.
+
 **Limitations of the evaluation.** NTHU-DDD (Kaggle copy) has four subjects and acted drowsiness; UTA-RLDD and NITYMED have only per-video labels; no public dataset has dark sunglasses or hands over the eyes with drowsiness labels, so those cases are tested only with simulated frames. Processing times in the tables are with six recordings processed in parallel; live, the pipeline needs about 10–15 ms per frame.
 
 ## Setup
@@ -163,7 +165,7 @@ All commands are available as `drowsiness <command>` or `python -m drowsiness <c
 
 | Command | What it does |
 |---|---|
-| `drowsiness dashboard` | Streamlit dashboard: live video, signal values, indicator scores, score chart, alert history |
+| `drowsiness dashboard` | Streamlit dashboard: live video, static vs adaptive alert levels (and the trained model's output), signal values, indicator scores, score chart, alert history |
 | `drowsiness run` | OpenCV window with overlay. Keys: `q` quits, `c` recalibrates |
 | `drowsiness run --record session.csv` | the same, and also saves every frame's signals to a CSV |
 | `drowsiness process clip.mp4` | analyses a video file without a window and writes per-frame signals to a CSV (used for evaluation) |
@@ -193,7 +195,7 @@ src/drowsiness/
   indicators.py    closed-eye ratio/microsleep, yawn, head-tilt scores
   conditions.py    low-light and eye-occlusion detection
   fusion.py        StaticFusion baseline + AdaptiveFusion
-  learned.py       learned fusion (evaluated, not used live)
+  learned.py       learned fusion (evaluated; shown live for comparison, never drives alerts)
   alerts.py        3-level alert state machine + CSV event log
   audio.py         alarm sound (pygame)
   pipeline.py      per-frame orchestration -> FrameReport
@@ -205,7 +207,7 @@ src/drowsiness/
 tests/             unit tests + end-to-end tests on real frames
 tools/             evaluation, offline replay, tuning and learned fusion (needs data/)
 configs/           default configuration
-models/            MediaPipe face landmarker model
+models/            MediaPipe face landmarker model; trained learned-fusion model
 assets/            alarm sound, reference images
 ```
 

@@ -11,10 +11,15 @@ and 12 UTA subjects). Reported:
   (model trained on all of its training data)
 
     python tools/learned_variants.py
+    python tools/learned_variants.py --save models/learned_fusion.json
+
+``--save`` trains the "NTHU only, all features, l2=1" variant on all of
+NTHU-DDD and saves it for the dashboard, which shows it next to the rules.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -140,7 +145,33 @@ def evaluate(data, name: str, cols: list[int], l2: float, use_uta: bool) -> dict
     }
 
 
-def main() -> int:
+def save(path: Path) -> None:
+    """Train the dashboard's model: NTHU-DDD only, all features, l2=1."""
+    nthu = lf.load("nthu")
+    for df in nthu:
+        df.attrs["subject"] = "N" + str(df["subject"].iloc[0]).zfill(3)
+        df.attrs["y"] = df["drowsy"].to_numpy()
+    model = fit(nthu, ALL, 1.0)
+    model.threshold = threshold(model, ALL, nthu)
+    y = np.concatenate([df.attrs["y"] for df in nthu])
+    subjects = len({df.attrs["subject"] for df in nthu})
+    model.trained_on = (
+        f"NTHU-DDD, {len(y):,} labelled frames ({int(y.sum()):,} drowsy) of "
+        f"{subjects} subjects, each subject weighted equally"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.to_json(path)
+    print(pd.Series(model.coef, index=FEATURES).round(3).sort_values().to_string())
+    print("threshold", round(model.threshold, 3), "- saved", path)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--save", type=Path, help="train the dashboard's model and save it")
+    args = parser.parse_args(argv)
+    if args.save:
+        save(args.save)
+        return 0
     data = prepare()
     rows = [REFERENCE]
     for name, cols, l2, use_uta in (

@@ -237,6 +237,11 @@ def main(argv: list[str] | None = None) -> int:
     print(external(model, thr).to_string(index=False))
     if args.save:
         args.save.parent.mkdir(parents=True, exist_ok=True)
+        model.threshold = thr
+        model.trained_on = (
+            f"NTHU-DDD, {len(y):,} labelled frames of {len(nthu)} recordings "
+            f"({int(y.sum()):,} drowsy), L2 = {args.l2:g}"
+        )
         model.to_json(args.save)
         print("saved", args.save)
     return 0
