@@ -37,3 +37,6 @@ Docs/
 
 # Evaluation datasets and recorded clips (large, third-party or personal data)
 data/
+
+# Local Claude Code settings
+.claude/
