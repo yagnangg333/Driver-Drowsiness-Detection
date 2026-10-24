@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import learned_fusion as lf
 
 from drowsiness.evaluation import binary_metrics, roc_auc
-from drowsiness.learned import FEATURES, LogisticModel
+from drowsiness.fusion.learned import FEATURES, LogisticModel
 
 # Rule-based adaptive fusion on the same data (tools/evaluation_report.py).
 REFERENCE = {

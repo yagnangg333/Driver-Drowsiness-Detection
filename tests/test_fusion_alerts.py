@@ -1,9 +1,9 @@
 import pytest
 
 from drowsiness.alerts import AlertLevel, AlertManager, EventLog
-from drowsiness.conditions import NORMAL, Conditions
 from drowsiness.config import AlertConfig, FusionConfig
 from drowsiness.fusion import AdaptiveFusion, IndicatorScores, StaticFusion
+from drowsiness.fusion.adaptive.conditions import NORMAL, Conditions
 
 
 def test_static_fusion_normalizes_weights():

@@ -191,7 +191,7 @@ def test_low_light_is_detected_but_keeps_weights(config, awake_frame, drowsy_fra
 
 def test_occlusion_switches_to_adaptive_weights(config, awake_frame, drowsy_frame, monkeypatch):
     from drowsiness import pipeline as pipeline_module
-    from drowsiness.conditions import FrameConditions
+    from drowsiness.fusion.adaptive.conditions import FrameConditions
 
     covered = FrameConditions(
         face_brightness=80,
@@ -263,7 +263,7 @@ def test_microsleep_needs_visible_eyes(
     the rule a real microsleep behind glare would go unnoticed. The optional
     gate trades that for fewer glare false alarms."""
     from drowsiness import pipeline as pipeline_module
-    from drowsiness.conditions import FrameConditions
+    from drowsiness.fusion.adaptive.conditions import FrameConditions
 
     config = dataclasses.replace(
         config,

@@ -7,6 +7,7 @@ How the system works inside: the per-frame data flow, what each module does, the
 - [Data flow](#data-flow)
 - [Where to start reading](#where-to-start-reading)
 - [Modules](#modules)
+- [The fusion folder](#the-fusion-folder)
 - [Stage by stage](#stage-by-stage)
 - [Design rules](#design-rules)
 - [Extending the system](#extending-the-system)
@@ -19,8 +20,8 @@ flowchart LR
     B --> C[Signals: EAR, MAR, head pose<br/>signals.py]
     C --> K[Per-driver calibration<br/>calibration.py]
     K --> D[Indicators: eyes, yawns, head<br/>indicators.py]
-    B --> H[Conditions: low light,<br/>occlusion, smiling<br/>conditions.py]
-    D --> E[Fusion: static + adaptive<br/>fusion.py]
+    B --> H[Conditions: low light,<br/>occlusion, smiling<br/>fusion/adaptive/conditions.py]
+    D --> E[Fusion: static · adaptive · learned<br/>fusion/]
     H -->|weights, ignored closures| E
     E --> F[Alert manager x2<br/>alerts.py]
     F --> R[FrameReport<br/>pipeline.py]
@@ -35,14 +36,14 @@ Both fusion strategies, static and adaptive, run on **every** frame from the sam
 
 1. [`pipeline.py`](src/drowsiness/pipeline.py), `DrowsinessPipeline.process`: the whole per-frame flow in about 80 lines.
 2. [`signals.py`](src/drowsiness/signals.py): the measurements (EAR, MAR, head pose).
-3. [`indicators.py`](src/drowsiness/indicators.py) and [`fusion.py`](src/drowsiness/fusion.py): how measurements become a drowsiness score.
-4. [`conditions.py`](src/drowsiness/conditions.py): what makes this project different from fixed-weight fusion.
+3. [`indicators.py`](src/drowsiness/indicators.py) and [`fusion/`](src/drowsiness/fusion): how measurements become a drowsiness score, one folder per strategy (see [The fusion folder](#the-fusion-folder)).
+4. [`fusion/adaptive/`](src/drowsiness/fusion/adaptive): what makes this project different from fixed-weight fusion.
 5. [`alerts.py`](src/drowsiness/alerts.py): how a score becomes an alert, and the safety rules.
 6. [`config.py`](src/drowsiness/config.py) next to [`configs/default.toml`](configs/default.toml): every tunable value, with comments explaining where it came from.
 
 ## Modules
 
-All code lives in the `drowsiness` package under `src/` (about 3,500 lines). Modules depend only on modules above them in this table, so there are no import cycles.
+All code lives in the `drowsiness` package under `src/` (about 3,700 lines). Modules depend only on modules above them in this table, with one exception: `fusion/base.py` uses the `Conditions` type from `fusion/adaptive/conditions.py`. There are no import cycles.
 
 | Module | Responsibility | Main types |
 |---|---|---|
@@ -51,11 +52,12 @@ All code lives in the `drowsiness` package under `src/` (about 3,500 lines). Mod
 | [`signals.py`](src/drowsiness/signals.py) | Per-frame geometry: EAR, MAR, head pose | `FaceSignals`, `HeadPose` |
 | [`calibration.py`](src/drowsiness/calibration.py) | 5-second per-driver baseline, with rejection and retries | `Calibrator`, `Baseline` |
 | [`indicators.py`](src/drowsiness/indicators.py) | Time-based cue scores in [0, 1] | `EyeClosureIndicator`, `YawnIndicator`, `HeadTiltIndicator` and their `*State` |
-| [`conditions.py`](src/drowsiness/conditions.py) | Low light, eye occlusion, smiling; smoothing and hysteresis | `ConditionDetector`, `Conditions` |
-| [`fusion.py`](src/drowsiness/fusion.py) | Weighted fusion behind one interface | `FusionStrategy`, `StaticFusion`, `AdaptiveFusion` |
+| [`fusion/base.py`](src/drowsiness/fusion/base.py) | The interface every fusion strategy implements | `FusionStrategy`, `IndicatorScores`, `Weights`, `FusionResult` |
+| [`fusion/static/`](src/drowsiness/fusion/static) | Static fusion: fixed weights (the baseline) | `StaticFusion` |
+| [`fusion/adaptive/`](src/drowsiness/fusion/adaptive) | Condition detection (low light, eye occlusion, smiling) and condition-aware fusion (our method) | `ConditionDetector`, `Conditions`, `AdaptiveFusion` |
+| [`fusion/learned/`](src/drowsiness/fusion/learned) | Logistic-regression fusion: features, training, live use (evaluated; shown live for comparison, never drives alerts) | `FeatureTracker`, `LogisticModel`, `LiveLearnedFusion` |
 | [`alerts.py`](src/drowsiness/alerts.py) | Three-level alert state machine; CSV event log | `AlertManager`, `AlertLevel`, `AlertEvent`, `EventLog` |
 | [`pipeline.py`](src/drowsiness/pipeline.py) | Per-frame orchestration | `DrowsinessPipeline`, `FrameReport` |
-| [`learned.py`](src/drowsiness/learned.py) | Logistic-regression fusion (evaluated; shown live for comparison, never drives alerts) | `FeatureTracker`, `LogisticModel`, `LiveLearnedFusion` |
 | [`evaluation.py`](src/drowsiness/evaluation.py) | Metrics shared by the evaluation tools | `replay_alerts`, `binary_metrics`, `roc_auc`, `detection_delays` |
 | [`video.py`](src/drowsiness/video.py) | Camera or file input with timestamps and reconnection | `VideoSource` |
 | [`audio.py`](src/drowsiness/audio.py) | Alarm sound per alert level (pygame) | `AlarmPlayer` |
@@ -63,6 +65,32 @@ All code lives in the `drowsiness` package under `src/` (about 3,500 lines). Mod
 | [`recording.py`](src/drowsiness/recording.py) | Per-frame CSV output (`--record`, `process`) | `SignalRecorder` |
 | [`cli.py`](src/drowsiness/cli.py) | Commands: `run`, `process`, `dashboard`, `download-model` | `main` |
 | [`dashboard.py`](src/drowsiness/dashboard.py) | Streamlit dashboard | `main` |
+
+## The fusion folder
+
+The three fusion strategies have different code and a different flow, so each has its own folder. All three receive the same indicator scores from the pipeline.
+
+```
+src/drowsiness/fusion/
+├── base.py              the interface every strategy implements (FusionStrategy)
+├── static/
+│   └── fusion.py        StaticFusion: fixed weights eyes 0.5, yawn 0.2, head 0.3
+├── adaptive/
+│   ├── conditions.py    ConditionDetector: smiling, eyes occluded, low light, per frame
+│   └── fusion.py        AdaptiveFusion: condition-aware weights
+└── learned/
+    ├── features.py      FeatureTracker: 13 features from the last 10-30 s
+    ├── model.py         LogisticModel: training (IRLS), prediction, JSON save/load
+    └── live.py          LiveLearnedFusion: runs the saved model on live frames
+```
+
+| Strategy | Flow per frame | Decides the alarm? |
+|---|---|---|
+| **Static** (baseline) | indicator scores → fixed weighted average → alert manager | yes, if `fusion.strategy = "static"` |
+| **Adaptive** (ours, default) | conditions detected → eye closures while smiling not counted, weights changed when the eyes are covered → weighted average → alert manager | yes (default) |
+| **Learned** (comparison) | 13 windowed features → logistic regression → probability of drowsiness, shown in the dashboard | never |
+
+Static and adaptive both run on every frame inside `DrowsinessPipeline`, each with its own alert manager, so the dashboard and the evaluation compare them on identical input. The learned model runs next to them in the dashboard. It is trained offline by [`tools/learned_variants.py`](tools/learned_variants.py) and saved to [`models/learned_fusion.json`](models/learned_fusion.json).
 
 ## Stage by stage
 
@@ -160,7 +188,7 @@ Recalibrating (the `c` key, or restarting detection in the dashboard) clears the
 
 ### Learned fusion (comparison only)
 
-[`learned.py`](src/drowsiness/learned.py) holds a logistic-regression alternative to the hand-set fusion. `FeatureTracker` computes 13 features from the last 10–30 s, using only the past, so the same code serves training and live use. `LogisticModel` is fitted with Newton's method (IRLS) in NumPy and saved as JSON ([`models/learned_fusion.json`](models/learned_fusion.json)). `LiveLearnedFusion` feeds it the live `FrameReport`s; the dashboard shows its output next to the two rule-based strategies, but it never drives the alarm. Why it was not adopted is in [EVALUATION.md](EVALUATION.md#learned-fusion).
+[`fusion/learned/`](src/drowsiness/fusion/learned) holds a logistic-regression alternative to the hand-set fusion. `FeatureTracker` computes 13 features from the last 10–30 s, using only the past, so the same code serves training and live use. `LogisticModel` is fitted with Newton's method (IRLS) in NumPy and saved as JSON ([`models/learned_fusion.json`](models/learned_fusion.json)). `LiveLearnedFusion` feeds it the live `FrameReport`s; the dashboard shows its output next to the two rule-based strategies, but it never drives the alarm. Why it was not adopted is in [EVALUATION.md](EVALUATION.md#learned-fusion).
 
 ## Design rules
 
@@ -180,9 +208,9 @@ These hold throughout the code; please keep them when changing it.
 
 **Add a configuration value.** Add a field to the relevant dataclass in `config.py` (with a validation check in its `__post_init__` if it has a valid range), add it to `configs/default.toml`, and add a test in `tests/test_config.py`.
 
-**Add a condition.** Measure it in `conditions.measure` (add a field to `FrameConditions`), smooth and decide it in `ConditionDetector.update` (add a field to `Conditions`), then use it in `AdaptiveFusion.target` (a new weight row in `FusionConfig`) or in `DrowsinessPipeline._update_indicators`. Add it to `FrameReport.to_row` so it is logged, and to the dashboard badges.
+**Add a condition.** In [`fusion/adaptive/conditions.py`](src/drowsiness/fusion/adaptive/conditions.py), measure it in `measure` (add a field to `FrameConditions`), smooth and decide it in `ConditionDetector.update` (add a field to `Conditions`), then use it in `AdaptiveFusion.target` in `fusion/adaptive/fusion.py` (a new weight row in `FusionConfig`) or in `DrowsinessPipeline._update_indicators`. Add it to `FrameReport.to_row` so it is logged, and to the dashboard badges.
 
-**Add a fusion strategy.** Implement the `FusionStrategy` protocol (`name`, `fuse(scores, conditions, t)`, `reset()`) in `fusion.py`, and pass an instance to `DrowsinessPipeline(config, fusion=...)`. It receives the same `IndicatorScores` and `Conditions` as the built-in strategies.
+**Add a fusion strategy.** Implement the `FusionStrategy` protocol (`name`, `fuse(scores, conditions, t)`, `reset()`) in a new folder under `fusion/` (like `fusion/static/`), and pass an instance to `DrowsinessPipeline(config, fusion=...)`. It receives the same `IndicatorScores` and `Conditions` as the built-in strategies.
 
 **Add an output.** Read `FrameReport`s from the loop in `cli.py` or `dashboard.py`. Everything computed for a frame is in the report, and `FrameReport.to_row()` gives a flat dict for CSV output.
 

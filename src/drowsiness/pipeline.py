@@ -12,7 +12,6 @@ import numpy as np
 
 from drowsiness.alerts import AlertEvent, AlertLevel, AlertManager
 from drowsiness.calibration import Baseline, Calibrator
-from drowsiness.conditions import ConditionDetector, Conditions, measure
 from drowsiness.config import AppConfig
 from drowsiness.fusion import (
     AdaptiveFusion,
@@ -21,6 +20,7 @@ from drowsiness.fusion import (
     IndicatorScores,
     StaticFusion,
 )
+from drowsiness.fusion.adaptive.conditions import ConditionDetector, Conditions, measure
 from drowsiness.indicators import (
     EyeClosureIndicator,
     EyeState,

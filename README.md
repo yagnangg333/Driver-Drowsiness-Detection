@@ -139,10 +139,14 @@ The dashboard runs one detection session at a time; a second browser tab is told
 │   ├── signals.py           EAR, MAR, head pose (solvePnP)
 │   ├── calibration.py       per-driver baseline
 │   ├── indicators.py        eye closure / microsleep, yawn and head-tilt scores
-│   ├── conditions.py        smiling, eye occlusion and low-light detection
-│   ├── fusion.py            static (baseline) and adaptive fusion
+│   ├── fusion/              the three ways of combining the cues, one folder each
+│   │   ├── base.py          the interface every strategy implements
+│   │   ├── static/          fixed weights 0.5 / 0.2 / 0.3: the baseline
+│   │   ├── adaptive/        conditions.py (smiling, covered eyes, low light) +
+│   │   │                    fusion.py (condition-aware weights): our method
+│   │   └── learned/         features.py, model.py (logistic regression), live.py:
+│   │                        the trained model, shown for comparison only
 │   ├── alerts.py            3-level alert state machine, CSV event log
-│   ├── learned.py           logistic-regression fusion (comparison only)
 │   ├── evaluation.py        metrics shared by the evaluation tools
 │   ├── config.py            typed configuration, TOML loading and validation
 │   ├── video.py, audio.py   camera/video input, alarm sound

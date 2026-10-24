@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from drowsiness.alerts import AlertLevel
-from drowsiness.conditions import LEFT_EYE_CONTOUR, RIGHT_EYE_CONTOUR
+from drowsiness.fusion.adaptive.conditions import LEFT_EYE_CONTOUR, RIGHT_EYE_CONTOUR
 from drowsiness.pipeline import FrameReport
 
 INNER_LIPS = (

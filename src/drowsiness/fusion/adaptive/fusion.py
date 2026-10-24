@@ -1,75 +1,14 @@
-"""Fusion of indicator scores into a single drowsiness score.
+"""Adaptive fusion: weights that depend on the detected conditions.
 
-``StaticFusion`` is the fixed-weight baseline. ``AdaptiveFusion`` changes the
-weights with the detected conditions (low light, eye occlusion) and, under
-normal conditions, uses exactly the static weights. Every strategy receives the
-same indicator scores, so comparisons isolate the effect of the weighting alone.
+Under normal conditions it uses exactly the static weights, so any difference
+from the static baseline comes only from adapting to a condition.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
-
-from drowsiness.conditions import NORMAL, Conditions
 from drowsiness.config import FusionConfig
-
-
-@dataclass(frozen=True)
-class IndicatorScores:
-    eye: float
-    yawn: float
-    head: float
-
-
-@dataclass(frozen=True)
-class Weights:
-    eye: float
-    yawn: float
-    head: float
-
-    def normalized(self) -> Weights:
-        total = self.eye + self.yawn + self.head
-        return Weights(self.eye / total, self.yawn / total, self.head / total)
-
-
-@dataclass(frozen=True)
-class FusionResult:
-    score: float
-    weights: Weights
-
-
-class FusionStrategy(Protocol):
-    name: str
-
-    def fuse(
-        self, scores: IndicatorScores, conditions: Conditions = NORMAL, t: float = 0.0
-    ) -> FusionResult: ...
-
-    def reset(self) -> None: ...
-
-
-def _weighted(w: Weights, scores: IndicatorScores) -> float:
-    return w.eye * scores.eye + w.yawn * scores.yawn + w.head * scores.head
-
-
-class StaticFusion:
-    """Weighted average with fixed, condition-independent weights."""
-
-    name = "static"
-
-    def __init__(self, config: FusionConfig):
-        self.weights = Weights(
-            config.eye_weight, config.yawn_weight, config.head_weight
-        ).normalized()
-
-    def fuse(
-        self, scores: IndicatorScores, conditions: Conditions = NORMAL, t: float = 0.0
-    ) -> FusionResult:
-        return FusionResult(_weighted(self.weights, scores), self.weights)
-
-    def reset(self) -> None:
-        pass
+from drowsiness.fusion.adaptive.conditions import NORMAL, Conditions
+from drowsiness.fusion.base import FusionResult, IndicatorScores, Weights, weighted
 
 
 class AdaptiveFusion:
@@ -135,4 +74,4 @@ class AdaptiveFusion:
                 c.head + f * (target.head - c.head),
             )
         self._last_t = t
-        return FusionResult(_weighted(self._current, scores), self._current)
+        return FusionResult(weighted(self._current, scores), self._current)

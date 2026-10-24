@@ -7,7 +7,7 @@ instead of guessing them. For every video it measures:
 - then one frame every ``step`` seconds,
 
 and writes one CSV row per frame with the raw measurements from
-``drowsiness.conditions.measure`` plus what is known about the video (dataset,
+``drowsiness.fusion.adaptive.conditions.measure`` plus what is known about the video (dataset,
 night or day, type of glasses).
 
     python tools/condition_features.py --out data/condition_features.csv
@@ -30,8 +30,8 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import cv2
 
-from drowsiness.conditions import measure
 from drowsiness.config import PROJECT_ROOT, ConditionConfig
+from drowsiness.fusion.adaptive.conditions import measure
 from drowsiness.landmarks import FaceLandmarker
 from drowsiness.signals import compute_signals
 

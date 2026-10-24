@@ -21,10 +21,10 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from drowsiness.conditions import Conditions
 from drowsiness.config import PROJECT_ROOT, AppConfig
 from drowsiness.evaluation import replay_alerts
 from drowsiness.fusion import AdaptiveFusion, IndicatorScores, StaticFusion
+from drowsiness.fusion.adaptive.conditions import Conditions
 from drowsiness.indicators import EyeClosureIndicator, HeadTiltIndicator, YawnIndicator
 
 EVAL = PROJECT_ROOT / "data" / "eval"

@@ -1,7 +1,7 @@
 """Train and evaluate the learned fusion model against static and adaptive fusion.
 
 Features come from the per-frame signals saved by ``tools/run_evaluation.py``
-(no video is re-processed), computed by ``drowsiness.learned.FeatureTracker``,
+(no video is re-processed), computed by ``drowsiness.fusion.learned.FeatureTracker``,
 the same code the live system would use.
 
 1. Leave-one-subject-out on NTHU-DDD: train on three subjects, test on the
@@ -27,7 +27,7 @@ import replay
 
 from drowsiness.config import AppConfig
 from drowsiness.evaluation import binary_metrics, replay_alerts, roc_auc
-from drowsiness.learned import FEATURES, FeatureTracker, LogisticModel
+from drowsiness.fusion.learned import FEATURES, FeatureTracker, LogisticModel
 
 CFG = AppConfig()
 
