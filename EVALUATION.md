@@ -7,6 +7,7 @@ How the system was evaluated, the results, what the evaluation changed in the de
 - [Datasets](#datasets)
 - [Method](#method)
 - [Results](#results)
+- [Where each number comes from](#where-each-number-comes-from)
 - [Condition thresholds](#condition-thresholds)
 - [What the evaluation changed](#what-the-evaluation-changed)
 - [Learned fusion](#learned-fusion)
@@ -19,10 +20,10 @@ Four public datasets, 489 recordings and about 630,000 frames. They are not in t
 
 | Dataset | Content used | Ground-truth labels | Used to measure |
 |---|---|---|---|
-| **NTHU-DDD** (Kaggle copy) | 18,000 infrared frames of 4 subjects, acted drowsiness, with and without glasses | drowsy / not drowsy **per frame** | frame-level F1, false alarms, ROC-AUC, detection delay |
-| **YawDD** | 320 day-driving "Mirror" clips, with clear glasses and sunglasses | normal / talking / yawning **per clip** | false warnings while talking; yawn detection |
+| **NTHU-DDD** (Kaggle copy) | 18,000 infrared frames (7 recordings of 4 subjects; 9,000 drowsy, 9,000 not), acted drowsiness, with and without glasses | drowsy / not drowsy **per frame** | frame-level F1, false alarms, ROC-AUC, detection delay |
+| **YawDD** | 320 day-driving "Mirror" clips (105 normal, 100 talking, 115 yawning or talking-and-yawning), with clear glasses and sunglasses; 319 scored (one 10-second yawning clip never finished calibration) | normal / talking / yawning **per clip** | false warnings while talking; yawn detection |
 | **UTA-RLDD** (fold 1) | 36 ten-minute videos of 12 people, **real** tiredness | alert (0) / low vigilant (5) / drowsy (10) **per video** | whether drowsy videos score higher than alert ones |
-| **NITYMED** | 126 real night-driving videos | yawning / microsleep **per video** | night-time detection |
+| **NITYMED** | 126 real night-driving videos (19 microsleep, 107 yawning) | yawning / microsleep **per video** | night-time detection |
 
 ## Method
 
@@ -31,7 +32,7 @@ Four public datasets, 489 recordings and about 630,000 frames. They are not in t
 - **Detection delay.** Time from the start of a labelled drowsy episode to the first alert. Only episodes that start without an alert already on are counted (23 of 41); the others are continuations of an earlier episode.
 - **Clip and video level.** YawDD: the share of clips with a warning. UTA-RLDD: AUC of each video's mean score, drowsy vs alert. NITYMED: the share of microsleep videos raising an alarm, and yawns detected per video.
 - **Held-out validation.** Every setting was chosen on part of the data and checked on data it was not chosen on: leave-one-subject-out on NTHU-DDD (chosen on 3 subjects, scored on the 4th, predictions pooled), or half of the drivers or videos elsewhere. Splits are always by subject or video, never by frame, because neighbouring frames are nearly identical.
-- **Offline replay.** [`tools/replay.py`](tools/replay.py) re-runs everything after face tracking on the recorded signals, in seconds instead of hours. It matches the real pipeline on 98.6–99.98% of frames. Candidate settings were explored with it; all reported numbers come from the real pipeline.
+- **Offline replay.** [`tools/replay.py`](tools/replay.py) re-runs everything after face tracking on the recorded signals, in seconds instead of hours. It matches the real pipeline on 98.6–99.98% of frames. Candidate settings were explored with it. The final results come from the real pipeline, except the **held-out** results and the **learned-fusion** comparison: these need different settings or models for each held-out subject, so they are computed with the simulator on the recorded signals (see [where each number comes from](#where-each-number-comes-from)).
 
 ## Results
 
@@ -41,19 +42,40 @@ Final settings, full pipeline, static vs adaptive on identical frames:
 |---|---|---|---|
 | **NTHU-DDD** | F1 at warning / alarm level | 76.6% / 71.8% | **80.9% / 76.4%** |
 | | false-alarm rate at warning / alarm level | 34.8% / 22.4% | **23.1% / 10.7%** |
-| | recall (warning level) | 83.6% | 83.6% |
+| | recall at warning / alarm level | 83.6% / 68.5% | 83.6% / 68.5% |
 | | ROC-AUC of the fused score | 0.823 | **0.883** |
 | | **held out:** F1 / false alarms, smile settings chosen without the scored subject | 76.5% / 35.0% | **82.7% / 18.4%** |
 | | drowsy episodes detected / median delay | 82.6% / 1.6 s | 82.6% / 1.6 s |
 | **YawDD** | talking clips with a (false) warning | 31% | **16%** |
 | | normal-driving clips with a (false) warning | 11.4% | **9.5%** |
 | | yawning clips with a yawn detected | 68–77% | 68–77% |
-| **UTA-RLDD** | AUC drowsy vs alert video (mean score) | 0.868 | 0.861 |
+| **UTA-RLDD** | AUC drowsy vs alert video (mean score; 12 drowsy vs 12 alert videos) | 0.868 | 0.861 |
 | | subjects whose drowsy video scores higher | 12/12 | 12/12 |
-| **NITYMED** | microsleep videos raising an alarm | 94.7% | 94.7% |
+| **NITYMED** | microsleep videos raising an alarm | 94.7% (18/19) | 94.7% (18/19) |
 | | yawns detected per video (3 performed) | 2.34 | 2.34 |
 
 Adaptive fusion keeps every detection of the static baseline on NTHU-DDD (same recall) while cutting false alarms by a third at warning level and by half at alarm level. The held-out row is the fairest estimate: for each subject the smile settings were chosen on the other three, while the static baseline has nothing tuned on NTHU-DDD. Night detection and the ranking of drowsy vs alert videos are unchanged; the small UTA-RLDD AUC difference (36 videos) changes no subject's ranking.
+
+## Where each number comes from
+
+All results are from the final evaluation run (21 October 2026). Warning-level and alarm-level results use the same frames, the same labels and the same metric code ([`binary_metrics`](src/drowsiness/evaluation.py)); only the cut-off differs: a frame counts as predicted drowsy at alert level ≥ 1 (warning) or ≥ 2 (alarm).
+
+| Number | Dataset and split | Definition | Computed by |
+|---|---|---|---|
+| Recall 83.6% (warning), 68.5% (alarm) | NTHU-DDD, all 18,000 labelled frames | TP / (TP + FN); TP = 7,527, FN = 1,473 at warning level, for both strategies | real pipeline, [`evaluation_report.py`](tools/evaluation_report.py) |
+| False alarms 34.8% → 23.1% (warning), 22.4% → 10.7% (alarm) | NTHU-DDD, all frames (9,000 not drowsy) | FP / (FP + TN); at warning level FP = 3,136 → 2,081 | real pipeline, `evaluation_report.py` |
+| F1 76.6% → 80.9% (warning), 71.8% → 76.4% (alarm) | NTHU-DDD, all frames | 2TP / (2TP + FP + FN) | real pipeline, `evaluation_report.py` |
+| ROC-AUC 0.823 → 0.883 | NTHU-DDD, all frames | probability that a drowsy frame's fused score exceeds a non-drowsy frame's (Mann–Whitney, ties count half) | real pipeline, `evaluation_report.py` |
+| **Held out:** F1 76.5% → 82.7%, false alarms 35.0% → 18.4% (warning) | NTHU-DDD, leave-one-subject-out: the smile settings for each subject are chosen on the other three; the 4 test folds are pooled. Recall 83.6% → 83.5% | same as above | offline simulator, [`tune_smile.py`](tools/tune_smile.py) `held_out()` |
+| Median delay 1.6 s, 82.6% of episodes | NTHU-DDD, warning level; 23 drowsy episodes that start without an alert already on; 19 detected | time from the first drowsy frame of an episode to the first alerted frame | real pipeline, `evaluation_report.py` |
+| Talking clips warned 31% → 16%; normal clips 11.4% → 9.5% | YawDD, 100 talking and 105 normal clips | share of clips with at least one warning after calibration | real pipeline, `evaluation_report.py` |
+| AUC 0.868 / 0.861; 12/12 subjects | UTA-RLDD, 12 subjects × (alert, drowsy) videos | AUC of each video's mean fused score; subjects whose drowsy video has the higher mean | real pipeline, `evaluation_report.py` |
+| Night microsleep alarms 94.7% | NITYMED, 19 microsleep videos | videos with at least one alarm (level ≥ 2): 18 of 19 | real pipeline, `evaluation_report.py` |
+| Learned-fusion table | as in that table; every NTHU-DDD subject predicted by a model trained without them | same metrics | recorded signals, [`learned_variants.py`](tools/learned_variants.py) |
+
+Every "→" compares static with adaptive on the same frames. The numbers in the first rows were also recounted independently from the alert levels the pipeline logged, with identical confusion counts.
+
+**Sample sizes.** The frame-level results rest on 4 subjects (NTHU-DDD); differences of a few percentage points between strategies on UTA-RLDD (24 videos) or NITYMED (19 microsleep videos) correspond to one or two videos and should not be read as meaningful.
 
 ## Condition thresholds
 
