@@ -150,6 +150,11 @@ class LogisticModel:
     std: np.ndarray
     coef: np.ndarray
     intercept: float
+    # Probability at which the model calls a frame drowsy (chosen on the
+    # training data); 0.5 unless set after training.
+    threshold: float = 0.5
+    # What the model was trained on, for display; free text.
+    trained_on: str = ""
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         z = self.intercept + ((np.asarray(x, float) - self.mean) / self.std) @ self.coef
@@ -193,6 +198,8 @@ class LogisticModel:
             "std": self.std.tolist(),
             "coef": self.coef.tolist(),
             "intercept": self.intercept,
+            "threshold": self.threshold,
+            "trained_on": self.trained_on,
         }
         Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -207,4 +214,66 @@ class LogisticModel:
             np.array(data["std"]),
             np.array(data["coef"]),
             float(data["intercept"]),
+            float(data.get("threshold", 0.5)),
+            str(data.get("trained_on", "")),
         )
+
+
+# Short names for the features, for showing the model's weights.
+FEATURE_LABELS = {
+    "closed_frac_10s": "eyes closed, last 10 s",
+    "closed_frac_30s": "eyes closed, last 30 s",
+    "closure_s": "current closure length",
+    "long_closures_30s": "long closures, last 30 s",
+    "blinks_30s": "blinks, last 30 s",
+    "ear_rel_10s": "eye opening vs calibrated",
+    "yawn_score": "yawn score",
+    "mar_10s": "mouth opening",
+    "head_score": "head-tilt score",
+    "pitch_std_10s": "nodding (pitch spread)",
+    "smile_10s": "smile",
+    "low_light": "low light",
+    "eye_occluded": "eyes occluded",
+}
+
+
+class LiveLearnedFusion:
+    """Runs a saved model on the live pipeline's output, for comparison only.
+
+    The features are built exactly as for training (``tools/learned_fusion.py``):
+    eye closures as seen by the adaptive eye indicator, EAR relative to the
+    calibrated open-eye EAR, head pitch relative to the neutral pose and the
+    raw MediaPipe smile score. Returns None until calibration has finished.
+    """
+
+    def __init__(self, model: LogisticModel, ear_closed_ratio: float):
+        self.model = model
+        self._ear_closed_ratio = ear_closed_ratio
+        self._tracker = FeatureTracker()
+
+    def reset(self) -> None:
+        self._tracker.reset()
+
+    def update(self, report) -> float | None:
+        b = report.baseline
+        if report.calibrating or b is None:
+            return None
+        s = report.signals if report.face_detected else None
+        pose = s.pose if s else None
+        open_ear = b.ear_threshold / self._ear_closed_ratio
+        shapes = report.face.blendshapes if report.face_detected else {}
+        smile = (shapes.get("mouthSmileLeft", 0.0) + shapes.get("mouthSmileRight", 0.0)) / 2
+        x = self._tracker.update(
+            report.timestamp,
+            face=s is not None,
+            closed=report.eye_adaptive.closed,
+            ear_rel=s.ear / open_ear if s else math.nan,
+            mar=s.mar if s else math.nan,
+            yawn_score=report.yawn.score,
+            head_score=report.head.score,
+            pitch_rel=pose.pitch - b.pitch if pose else math.nan,
+            smile=smile,
+            low_light=report.conditions.low_light,
+            eye_occluded=report.conditions.eye_occluded,
+        )
+        return float(self.model.predict(x[None, :])[0])

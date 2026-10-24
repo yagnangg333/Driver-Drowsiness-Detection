@@ -23,6 +23,7 @@ from drowsiness import overlay
 from drowsiness.alerts import AlertEvent, AlertLevel, EventLog
 from drowsiness.audio import AlarmPlayer
 from drowsiness.config import AppConfig, ConfigError, load_config, resolve_path
+from drowsiness.learned import FEATURE_LABELS, LiveLearnedFusion, LogisticModel
 from drowsiness.pipeline import DrowsinessPipeline, FrameReport
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,21 @@ _LEVEL_COLOURS = {
 }
 STATIC_COLOUR = "#9ca3af"
 ADAPTIVE_COLOUR = "#2563eb"
+LEARNED_COLOUR = "#7c3aed"
+LEARNED_MODEL = "models/learned_fusion.json"  # written by tools/learned_variants.py --save
+
+# Held-out results of the learned model against the rules (report Table 10,
+# from tools/learned_variants.py): every subject predicted by a model that
+# never saw them.
+LEARNED_RESULTS = pd.DataFrame(
+    [
+        ("Rule-based adaptive (ours, used)", "80.9%", "23.1%", "0.861", "94.7%"),
+        ("Learned on NTHU-DDD (this model)", "76.9%", "27.7%", "0.458", "84.2%"),
+        ("Learned, no smile/condition features", "72.4%", "29.6%", "0.917", "84.2%"),
+        ("Learned on NTHU-DDD + UTA-RLDD", "77.5%", "30.1%", "0.604", "100%"),
+    ],
+    columns=["Fusion", "F1", "False alarms", "UTA AUC", "Night alarms"],
+)
 _LEVEL_NAMES = {
     AlertLevel.NONE: "Normal",
     AlertLevel.WARNING: "Warning",
@@ -59,6 +75,10 @@ _CSS = """
 .dd-card .dd-level {font-size: 1.55rem; font-weight: 700; line-height: 1.25;}
 .dd-card .dd-score {font-size: 0.85rem; opacity: 0.95;}
 .dd-ours {outline: 3px solid rgba(37, 99, 235, 0.85); outline-offset: 2px;}
+.dd-learned {outline: 2px dashed #7c3aed; outline-offset: 2px;}
+.dd-three .dd-card {padding: 8px 10px;}
+.dd-three .dd-level {font-size: 1.25rem;}
+.dd-three .dd-label {font-size: 0.7rem;}
 .dd-tiles {display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 6px 0 10px 0;}
 .dd-tile {border: 1px solid rgba(128, 128, 128, 0.35); border-radius: 8px; padding: 6px 10px;}
 .dd-tile .dd-k {font-size: 0.72rem; opacity: 0.7;}
@@ -83,6 +103,19 @@ def _alarm(sound_path: str) -> AlarmPlayer:
 def _camera_lock() -> threading.Lock:
     """Shared by every browser session, so only one detection loop uses the camera."""
     return threading.Lock()
+
+
+@st.cache_resource
+def _learned_model() -> LogisticModel | None:
+    """The trained logistic-regression fusion, if it has been trained and saved."""
+    path = resolve_path(LEARNED_MODEL)
+    if not path.exists():
+        return None
+    try:
+        return LogisticModel.from_json(path)
+    except (OSError, ValueError, KeyError) as exc:
+        log.warning("Cannot load the learned model %s: %s", path, exc)
+        return None
 
 
 def _sidebar(config: AppConfig, running: bool) -> tuple[AppConfig, bool]:
@@ -181,14 +214,33 @@ def _card(label: str, level: AlertLevel, score: float, ours: bool = False) -> st
     )
 
 
-def _compare_cards(report: FrameReport) -> str:
-    """The two strategies' alert levels side by side: the point of the project."""
+def _learned_card(probability: float | None, threshold: float) -> str:
+    if probability is None:
+        state, colour, detail = "-", "#6b7280", "warming up"
+    elif probability >= threshold:
+        state, colour, detail = "Drowsy", _LEVEL_COLOURS[AlertLevel.ALARM], ""
+    else:
+        state, colour, detail = "Alert", _LEVEL_COLOURS[AlertLevel.NONE], ""
+    detail = detail or f"p(drowsy) {probability:.2f}"
     return (
-        '<div class="dd-cards">'
-        + _card("STATIC · fixed weights", report.static_level, report.static_score)
-        + _card("ADAPTIVE · ours", report.adaptive_level, report.adaptive_score, ours=True)
-        + "</div>"
+        f'<div class="dd-card dd-learned" style="background:{colour}">'
+        '<div class="dd-label">LEARNED · trained model</div>'
+        f'<div class="dd-level">{state}</div>'
+        f'<div class="dd-score">{detail}</div></div>'
     )
+
+
+def _compare_cards(
+    report: FrameReport, learned: float | None = None, model: LogisticModel | None = None
+) -> str:
+    """The strategies' decisions side by side: the point of the project."""
+    cards = _card("STATIC · fixed weights", report.static_level, report.static_score) + _card(
+        "ADAPTIVE · ours", report.adaptive_level, report.adaptive_score, ours=True
+    )
+    if model is None:
+        return f'<div class="dd-cards">{cards}</div>'
+    cards += _learned_card(learned, model.threshold)
+    return f'<div class="dd-cards dd-three">{cards}</div>'
 
 
 def _tiles(items: list[tuple[str, str]]) -> str:
@@ -204,14 +256,24 @@ def _degrees(angle: float) -> str:
     return f"{rounded:+d}°" if rounded else "0°"  # no "-0°"
 
 
-def _panel(slot, report: FrameReport) -> None:
+def _panel(
+    slot,
+    report: FrameReport,
+    learned: float | None = None,
+    model: LogisticModel | None = None,
+) -> None:
     s = report.signals
     pose = s.pose if s else None
     with slot.container():
         if not report.calibrating:
-            st.markdown(_compare_cards(report), unsafe_allow_html=True)
+            st.markdown(_compare_cards(report, learned, model), unsafe_allow_html=True)
             if report.static_level > report.adaptive_level and report.conditions.smiling:
                 st.caption("Smiling: the static baseline reads the narrowed eyes as closing.")
+            if model is not None:
+                st.caption(
+                    "The learned model runs live for comparison only; the alarm follows "
+                    "the rule-based fusion, which did better on unseen drivers."
+                )
         st.markdown(_conditions_badges(report))
 
         st.markdown(
@@ -373,7 +435,9 @@ def _guide(slot) -> None:
             "two strategies run side by side:\n"
             "- **Static** uses fixed weights.\n"
             "- **Adaptive** (ours) ignores eye closures while you smile and trusts the "
-            "eyes less when they are covered."
+            "eyes less when they are covered.\n"
+            "- **Learned**: a logistic-regression model we trained on labelled frames, "
+            "shown for comparison (see *Trained model* below)."
         )
         st.markdown(
             "**Try it.** Turn on *Start detection* and look ahead for 5 s to calibrate. Then:\n"
@@ -382,6 +446,76 @@ def _guide(slot) -> None:
             "3. **Yawn slowly** or **nod forward.** The yawn and head cues rise.\n"
             "4. **Cover the camera.** The alert escalates after 3 s (face lost)."
         )
+
+
+def _coefficient_chart(model: LogisticModel) -> alt.Chart:
+    """The model's learned weight for each feature (per standard deviation)."""
+    df = pd.DataFrame(
+        {
+            "feature": [FEATURE_LABELS.get(f, f) for f in model.features],
+            "weight": model.coef,
+        }
+    )
+    df["pushes towards"] = ["drowsy" if w > 0 else "alert" for w in df["weight"]]
+    return (
+        alt.Chart(df)
+        .mark_bar()
+        .encode(
+            x=alt.X("weight:Q", title="learned weight (per standard deviation)"),
+            y=alt.Y(
+                "feature:N",
+                sort="-x",
+                title=None,
+                axis=alt.Axis(labelLimit=240, labelOverlap=False),
+            ),
+            color=alt.Color(
+                "pushes towards:N",
+                scale=alt.Scale(
+                    domain=["drowsy", "alert"],
+                    range=[_LEVEL_COLOURS[AlertLevel.ALARM], _LEVEL_COLOURS[AlertLevel.NONE]],
+                ),
+                legend=alt.Legend(orient="bottom"),
+            ),
+            tooltip=["feature", alt.Tooltip("weight:Q", format=".2f")],
+        )
+        .properties(height=len(df) * 28)
+    )
+
+
+def _trained_model_section(model: LogisticModel | None) -> None:
+    """How the learned fusion was trained, what it learned and how it compared."""
+    st.subheader("Trained model: logistic regression")
+    if model is None:
+        st.caption(
+            f"No trained model found. Train one with "
+            f"`python tools/learned_variants.py --save {LEARNED_MODEL}` (needs the datasets)."
+        )
+        return
+    left, right = st.columns([1, 1], gap="large")
+    with left:
+        st.markdown(
+            "Instead of hand-set weights, this model **learns** how to combine the cues "
+            "from labelled video:\n"
+            f"- **Data:** {model.trained_on or 'NTHU-DDD labelled frames'}.\n"
+            f"- **Inputs:** {len(model.features)} features computed from the last 10-30 s "
+            "(eye-closure fractions, closure length, blinks, eye opening, yawns, mouth "
+            "opening, head tilt, nodding, smile, conditions).\n"
+            "- **Method:** L2-regularised logistic regression, fitted by Newton's method "
+            "(iteratively reweighted least squares), implemented in NumPy.\n"
+            f"- **Output:** probability of drowsiness; *Drowsy* above "
+            f"{model.threshold:.2f} (threshold chosen on the training data)."
+        )
+    with right:
+        st.markdown("**What the model learned:** weight of each feature")
+        st.altair_chart(_coefficient_chart(model), use_container_width=True)
+    st.markdown("**Tested on drivers it never saw** (leave-one-subject-out):")
+    st.dataframe(LEARNED_RESULTS, hide_index=True, use_container_width=True)
+    st.caption(
+        "F1 and false alarms on NTHU-DDD; UTA AUC on real tiredness (UTA-RLDD); night "
+        "alarms on NITYMED microsleep videos. With four acted subjects the model learned "
+        'habits of its training data ("smiling means alert") that did not transfer to real '
+        "tiredness, so the explainable rule-based fusion drives the alarm."
+    )
 
 
 def _run(config: AppConfig, slots: dict) -> None:
@@ -398,6 +532,9 @@ def _run(config: AppConfig, slots: dict) -> None:
     st.session_state.events = events.events
     st.session_state.log_path = events.path
     history: deque[dict] = deque()
+    model = _learned_model()
+    learned = LiveLearnedFusion(model, config.calibration.ear_closed_ratio) if model else None
+    probability = None
     last_panel = last_chart = 0.0
     first_t = last_t = None
     fps = 0.0
@@ -414,6 +551,8 @@ def _run(config: AppConfig, slots: dict) -> None:
             started = True
             for frame, t in video:
                 report = pipeline.process(frame, t)
+                if learned is not None:
+                    probability = learned.update(report)
                 if alerts.sound_enabled:
                     alarm.set_level(report.alert_level)
                 if report.event:
@@ -443,7 +582,7 @@ def _run(config: AppConfig, slots: dict) -> None:
                 now = time.monotonic()
                 if now - last_panel >= PANEL_REFRESH_S:
                     _status(slots["status"], report)
-                    _panel(slots["panel"], report)
+                    _panel(slots["panel"], report, probability, model)
                     slots["session"].markdown(
                         _session_tiles(t - first_t, fps, events.events), unsafe_allow_html=True
                     )
@@ -509,6 +648,7 @@ def main() -> None:
     slots["chart"] = st.empty()
     st.subheader("Alert history")
     slots["events"] = st.empty()
+    _trained_model_section(_learned_model())
 
     if running:
         lock = _camera_lock()

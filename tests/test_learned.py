@@ -1,9 +1,10 @@
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from drowsiness.learned import FEATURES, FeatureTracker, LogisticModel
+from drowsiness.learned import FEATURES, FeatureTracker, LiveLearnedFusion, LogisticModel
 
 FPS = 10
 
@@ -83,3 +84,58 @@ def test_logistic_regression_learns_and_round_trips(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="different features"):
         LogisticModel.from_json(path)
+
+
+def test_threshold_and_training_note_are_saved(tmp_path):
+    model = LogisticModel(
+        FEATURES, np.zeros(len(FEATURES)), np.ones(len(FEATURES)), np.zeros(len(FEATURES)), 0.0
+    )
+    assert model.threshold == 0.5
+    model.threshold, model.trained_on = 0.55, "NTHU-DDD"
+    path = tmp_path / "model.json"
+    model.to_json(path)
+    again = LogisticModel.from_json(path)
+    assert again.threshold == 0.55 and again.trained_on == "NTHU-DDD"
+
+    data = json.loads(path.read_text())
+    del data["threshold"], data["trained_on"]  # a model saved before these existed
+    path.write_text(json.dumps(data))
+    assert LogisticModel.from_json(path).threshold == 0.5
+
+
+def _report(t, *, calibrating=False, closed=False, smile=0.0):
+    from drowsiness.calibration import Baseline
+    from drowsiness.conditions import Conditions
+    from drowsiness.indicators import EyeState
+
+    signals = SimpleNamespace(ear=0.1 if closed else 0.3, mar=0.1, pose=SimpleNamespace(pitch=0.0))
+    face = SimpleNamespace(blendshapes={"mouthSmileLeft": smile, "mouthSmileRight": smile})
+    return SimpleNamespace(
+        timestamp=t,
+        calibrating=calibrating,
+        baseline=None if calibrating else Baseline(ear_threshold=0.18, pitch=0.0),
+        face_detected=True,
+        face=face,
+        signals=signals,
+        eye_adaptive=EyeState(closed=closed),
+        yawn=SimpleNamespace(score=0.0),
+        head=SimpleNamespace(score=0.0),
+        conditions=Conditions(),
+    )
+
+
+def test_live_model_waits_for_calibration_then_scores_closures():
+    # Weight only on "eyes closed in the last 10 s": closing the eyes must raise p.
+    coef = np.zeros(len(FEATURES))
+    coef[FEATURES.index("closed_frac_10s")] = 5.0
+    model = LogisticModel(FEATURES, np.zeros(len(FEATURES)), np.ones(len(FEATURES)), coef, -2.0)
+    live = LiveLearnedFusion(model, ear_closed_ratio=0.6)
+    assert live.update(_report(0.0, calibrating=True)) is None
+    t, p_open = 0.0, None
+    for _ in range(30):
+        t += 0.1
+        p_open = live.update(_report(t))
+    for _ in range(50):
+        t += 0.1
+        p_closed = live.update(_report(t, closed=True))
+    assert p_open < 0.2 < 0.5 < p_closed

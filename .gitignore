@@ -35,5 +35,10 @@ Thumbs.db
 # Course documents (reports, slides) stay local
 Docs/
 
-# Evaluation datasets and recorded clips (large, third-party or personal data)
-data/
+# Evaluation datasets and recorded clips (large, third-party or personal data);
+# only the guide to them is tracked
+data/*
+!data/README.md
+
+# Local Claude Code settings
+.claude/
