@@ -206,7 +206,7 @@ tests/             unit tests + end-to-end tests on real frames
 tools/             evaluation, offline replay, tuning and learned fusion (needs data/)
 configs/           default configuration
 models/            MediaPipe face landmarker model
-assets/            alarm sound, reference images
+assets/            alarm sound
 ```
 
 ## Development
