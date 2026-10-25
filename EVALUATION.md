@@ -116,7 +116,7 @@ The dashboard runs the "NTHU-DDD, all features" model ([`models/learned_fusion.j
 
 ## Limitations
 
-- NTHU-DDD (Kaggle copy) has four subjects and acted drowsiness; UTA-RLDD and NITYMED have only per-video labels.
+- NTHU-DDD (Kaggle copy) has four subjects and acted drowsiness; UTA-RLDD and NITYMED have only per-video labels. UTA-RLDD and NITYMED were also used to check candidate detection settings, so their results are supporting evidence rather than a fully independent test. The condition thresholds were chosen on half of the videos without drowsiness labels.
 - No public dataset combines dark sunglasses or hands over the eyes with drowsiness labels, so the occlusion weights are tested only on simulated frames. On real footage it was checked that occlusion is not falsely detected.
 - A standard RGB webcam cannot see the face in complete darkness.
 - Processing times during evaluation were measured with six recordings in parallel; live, the pipeline needs about 10–15 ms per frame.
