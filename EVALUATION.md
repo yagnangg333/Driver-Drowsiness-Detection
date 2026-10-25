@@ -105,7 +105,7 @@ A logistic regression on 13 windowed features (eye-closure fractions, closure le
 
 | Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed |
 |---|---|---|---|---|---|
-| **Rule-based adaptive (used)** | **80.9%** | **23.1%** | 0.861 | 12.7% | **94.7%** |
+| **Rule-based adaptive (used)** | **82.7%** | **18.4%** | 0.861 | 12.7% | **94.7%** |
 | Learned on NTHU-DDD, all features | 76.8% | 27.8% | 0.458 | 3.4% | 84.2% |
 | Learned on NTHU-DDD, without smile and conditions | 72.3% | 29.7% | **0.917** | 4.9% | 84.2% |
 | Learned on NTHU-DDD + UTA-RLDD, all features | 77.0% | 27.0% | 0.597 | 6.8% | 100% |

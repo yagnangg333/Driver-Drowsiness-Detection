@@ -32,12 +32,13 @@ import learned_fusion as lf
 from drowsiness.evaluation import binary_metrics, roc_auc
 from drowsiness.fusion.learned import FEATURES, LogisticModel
 
-# Rule-based adaptive fusion on the same data (tools/evaluation_report.py).
+# Rule-based adaptive fusion, held out the same way (tools/tune_smile.py held_out());
+# the video-level columns come from tools/evaluation_report.py.
 REFERENCE = {
     "variant": "adaptive rules (current)",
-    "NTHU F1": 0.809,
-    "NTHU FA": 0.231,
-    "NTHU recall": 0.836,
+    "NTHU F1": 0.827,
+    "NTHU FA": 0.184,
+    "NTHU recall": 0.835,
     "UTA AUC": 0.861,
     "YawDD awake warned": 0.127,
     "night microsleep alarmed": 0.947,
