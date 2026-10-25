@@ -106,9 +106,9 @@ A logistic regression on 13 windowed features (eye-closure fractions, closure le
 | Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed |
 |---|---|---|---|---|---|
 | **Rule-based adaptive (used)** | **80.9%** | **23.1%** | 0.861 | 12.7% | **94.7%** |
-| Learned on NTHU-DDD, all features | 76.9% | 27.7% | 0.458 | 2.9% | 84.2% |
-| Learned on NTHU-DDD, without smile and conditions | 72.4% | 29.6% | **0.917** | 4.4% | 84.2% |
-| Learned on NTHU-DDD + UTA-RLDD, all features | 77.5% | 30.1% | 0.604 | 5.4% | 100% |
+| Learned on NTHU-DDD, all features | 76.8% | 27.8% | 0.458 | 3.4% | 84.2% |
+| Learned on NTHU-DDD, without smile and conditions | 72.3% | 29.7% | **0.917** | 4.9% | 84.2% |
+| Learned on NTHU-DDD + UTA-RLDD, all features | 77.0% | 27.0% | 0.597 | 6.8% | 100% |
 
 With four acted subjects the model learned the training set's habits (its largest weight says "smiling means alert") and did not transfer to real tiredness; each variant won on one dataset and lost on others. The safety rules (microsleep and face loss) stay in the alert manager in every variant.
 
