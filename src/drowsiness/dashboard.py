@@ -54,9 +54,9 @@ LEARNED_MODEL = "models/learned_fusion.json"  # written by tools/learned_variant
 LEARNED_RESULTS = pd.DataFrame(
     [
         ("Rule-based adaptive (ours, used)", "80.9%", "23.1%", "0.861", "94.7%"),
-        ("Learned on NTHU-DDD (this model)", "76.9%", "27.7%", "0.458", "84.2%"),
-        ("Learned, no smile/condition features", "72.4%", "29.6%", "0.917", "84.2%"),
-        ("Learned on NTHU-DDD + UTA-RLDD", "77.5%", "30.1%", "0.604", "100%"),
+        ("Learned on NTHU-DDD (this model)", "76.8%", "27.8%", "0.458", "84.2%"),
+        ("Learned, no smile/condition features", "72.3%", "29.7%", "0.917", "84.2%"),
+        ("Learned on NTHU-DDD + UTA-RLDD", "77.0%", "27.0%", "0.597", "100%"),
     ],
     columns=["Fusion", "F1", "False alarms", "UTA AUC", "Night alarms"],
 )

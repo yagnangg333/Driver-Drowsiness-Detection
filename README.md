@@ -195,7 +195,7 @@ GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `ma
 | 2 | Calibration, static fusion, 3-level alerts, dashboard | Done; the evaluation baseline |
 | 3 | Condition detection and adaptive (expression-aware) fusion | Done; tuned on real footage |
 | 4 | Evaluation against the static baseline on four public datasets; learned-fusion study | Done |
-| 5 | Own recordings, hardware prototype (Raspberry Pi with an infrared camera), final report | Planned (end-semester) |
+| 5 | Own recordings, final report | Planned (end-semester) |
 
 ## References
 
