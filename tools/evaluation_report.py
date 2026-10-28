@@ -224,13 +224,115 @@ def yawdd(df: pd.DataFrame) -> list[str]:
     return out
 
 
+# --- UL-DD: awake and drowsy sessions, KSS every 4 minutes -----------------------
+
+KSS_WINDOW_S = 240.0  # one self-reported KSS rating per 4 minutes, 10 per session
+
+
+def spearman(a, b) -> float:
+    """Rank correlation (Pearson on ranks; scipy is not a dependency)."""
+    return float(np.corrcoef(pd.Series(a).rank(), pd.Series(b).rank())[0, 1])
+
+
+def kss_labels() -> pd.DataFrame:
+    """One row per (subject, session, window) with the KSS rating for that window."""
+    raw = pd.read_csv(PROJECT_ROOT / "data" / "UL-DD" / "Labels.csv", header=None)
+    rows = []
+    for _, r in raw.iterrows():
+        subject, session = r[0].split("_")
+        for window, kss in enumerate(r[1:].dropna()):
+            rows.append(
+                {
+                    "subject": subject,
+                    "session": session.lower().replace("alert", "awake"),
+                    "window": window,
+                    "kss": float(kss),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def ulldd(df: pd.DataFrame) -> list[str]:
+    out = [
+        "## UL-DD (infrared face video; awake and drowsy sessions; KSS every 4 minutes)",
+        conditions_line(df),
+        "",
+    ]
+    d = df[df["calibrating"] == 0].copy()
+    per = d.groupby("recording").agg(subject=("subject", "first"), session=("session", "first"))
+    for s in STRATEGIES:
+        g = d.groupby("recording")
+        per[f"{s}_alert_time"] = g[f"{s}_level"].apply(lambda x: (x >= 1).mean())
+        per[f"{s}_mean_score"] = g[f"{s}_score"].mean()
+    kss = kss_labels()
+    session_kss = kss.groupby(["subject", "session"])["kss"].mean()
+
+    rows = []
+    for session, g in per.groupby("session"):
+        row = {
+            "session": session,
+            "videos": len(g),
+            "mean KSS": f"{session_kss.loc[:, session].mean():.1f}",
+        }
+        for s in STRATEGIES:
+            row[f"{s}: time in alert"] = pct(g[f"{s}_alert_time"].mean())
+            row[f"{s}: mean score"] = f"{g[f'{s}_mean_score'].mean():.3f}"
+        rows.append(row)
+    out += [table(pd.DataFrame(rows)), ""]
+
+    # Score per 4-minute window, matched to the KSS rating given for that window.
+    d["window"] = (d["timestamp_s"] // KSS_WINDOW_S).astype(int)
+    win = d.groupby(["subject", "session", "window"])[[f"{s}_score" for s in STRATEGIES]].mean()
+    win = win.reset_index().merge(kss, on=["subject", "session", "window"])
+    drowsy = per["session"] == "drowsy"
+    rows = []
+    for s in STRATEGIES:
+        wide = per.pivot(index="subject", columns="session", values=f"{s}_mean_score").dropna()
+        higher = int((wide["drowsy"] > wide["awake"]).sum())
+        within = [
+            spearman(g["kss"], g[f"{s}_score"])
+            for _, g in win.groupby("subject")
+            if g["kss"].nunique() > 1
+        ]
+        score, alert_time, win_score = (
+            per[f"{s}_mean_score"],
+            per[f"{s}_alert_time"],
+            win[f"{s}_score"],
+        )
+        rows.append(
+            {
+                "fusion": s,
+                "AUC drowsy vs awake (mean score)": f"{roc_auc(drowsy, score):.3f}",
+                "AUC drowsy vs awake (time in alert)": f"{roc_auc(drowsy, alert_time):.3f}",
+                "drowsy session scores higher": f"{higher}/{len(wide)} subjects",
+                "Spearman score vs KSS (all windows)": f"{spearman(win['kss'], win_score):.2f}",
+                "Spearman within subject (median)": f"{np.median(within):.2f}",
+                "AUC KSS >= 7 windows": f"{roc_auc(win['kss'] >= 7, win_score):.3f}",
+            }
+        )
+    out += [
+        table(pd.DataFrame(rows)),
+        "",
+        f"{len(win)} four-minute windows matched to a KSS rating.",
+        "",
+    ]
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=EVAL / "results.md")
     args = parser.parse_args(argv)
 
     lines = ["# Phase 4 results: static vs adaptive fusion", ""]
-    for name, section in (("nthu", nthu), ("uta", uta), ("nitymed", nitymed), ("yawdd", yawdd)):
+    sections = (
+        ("nthu", nthu),
+        ("uta", uta),
+        ("nitymed", nitymed),
+        ("yawdd", yawdd),
+        ("ulldd", ulldd),
+    )
+    for name, section in sections:
         df = load(name)
         lines += section(df) if not df.empty else [f"## {name}: no results yet", ""]
     text = "\n".join(lines)
