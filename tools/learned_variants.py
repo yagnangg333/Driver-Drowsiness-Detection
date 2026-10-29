@@ -102,9 +102,10 @@ def ulldd_checks(recs: list[pd.DataFrame], model, cols: list[int], t: float) -> 
         live = df["calibrating"].to_numpy() == 0
         drowsy.append(df["session"].iloc[0] == "drowsy")
         means.append(model.predict(df.attrs["x"][:, cols])[live].mean())
-        frames = df[["subject", "session", "window", "kss"]].assign(
-            warn=warn(df, model, cols, t) >= 1
-        )[live]
+        # A new frame: df.attrs holds the feature matrix, which concat would compare.
+        frames = pd.DataFrame(
+            {c: df[c].to_numpy() for c in ("subject", "session", "window", "kss")}
+        ).assign(warn=warn(df, model, cols, t) >= 1)[live]
         windows.append(frames.groupby(["subject", "session", "window"]).mean().reset_index())
     w = pd.concat(windows, ignore_index=True).dropna(subset=["kss"])
     sleepy = w["kss"] >= 7

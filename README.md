@@ -9,7 +9,7 @@ Real-time driver drowsiness detection from a webcam, with **condition-aware adap
 The system tracks the driver's face with MediaPipe and measures three drowsiness cues: **eye closure**, **yawning** and **head nodding/tilting**. It combines them into one score that drives three alert levels. What makes it different from a fixed-weight detector: it recognises conditions in which a cue is misleading (smiling, covered eyes) and adapts how the cues are combined, so it raises **fewer false alarms without missing drowsiness**.
 
 > [!WARNING]
-> **A course prototype, not a safety device.** Its accuracy was measured on four public datasets, most with acted or per-video-labelled drowsiness, and it has not been tested in a real vehicle. Never rely on it while driving.
+> **A course prototype, not a safety device.** Its accuracy was measured on five public datasets, most with acted, per-video or per-session drowsiness labels, and it has not been tested in a real vehicle. Never rely on it while driving.
 
 ## At a glance
 
@@ -88,7 +88,7 @@ The full description, module by module, is in **[ARCHITECTURE.md](ARCHITECTURE.m
 
 ## Results
 
-Evaluated on four public datasets (489 recordings, about 630,000 frames), with both strategies scored on identical frames:
+Evaluated on five public datasets (518 recordings, about 1.67 million frames), with both strategies scored on identical frames:
 
 | Dataset | Measure | Static | Adaptive |
 |---|---|---|---|
@@ -99,6 +99,8 @@ Evaluated on four public datasets (489 recordings, about 630,000 frames), with b
 | **YawDD** | talking clips with a false warning | 31% | **16%** |
 | **UTA-RLDD** (real tiredness) | subjects whose drowsy video scores higher | 12/12 | 12/12 |
 | **NITYMED** (night driving) | microsleep videos raising an alarm | 94.7% (18/19) | 94.7% (18/19) |
+| **UL-DD** (real drowsiness; never used for tuning) | drowsy vs awake sessions classified correctly | 82.8% (24/29) | **89.7% (26/29)** |
+| | 4-minute windows rated sleepy (KSS ≥ 7): accuracy / F1 | 70.6% / 64.1% | **78.2% / 71.5%** |
 
 The improvement comes from not counting smiles and laughter as eye closures, the largest source of false alarms. A trained logistic-regression fusion was also evaluated and did not beat the rules on unseen subjects; the dashboard shows it live for comparison. Where each number comes from (dataset, split, definition, script), full results, findings and limitations: **[EVALUATION.md](EVALUATION.md)**.
 
@@ -194,7 +196,7 @@ GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `ma
 | 1 | Landmark pipeline; EAR, MAR, head pose | Done |
 | 2 | Calibration, static fusion, 3-level alerts, dashboard | Done; the evaluation baseline |
 | 3 | Condition detection and adaptive (expression-aware) fusion | Done; tuned on real footage |
-| 4 | Evaluation against the static baseline on four public datasets; learned-fusion study | Done |
+| 4 | Evaluation against the static baseline on five public datasets; learned-fusion study | Done |
 | 5 | Own recordings, final report | Planned (end-semester) |
 
 ## References
@@ -206,6 +208,7 @@ GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `ma
 5. S. Abtahi, M. Omidyeganeh, S. Shirmohammadi and B. Hariri, "YawDD: A Yawning Detection Dataset," Proc. ACM Multimedia Systems, 2014.
 6. R. Ghoddoosian, M. Galib and V. Athitsos, "A Realistic Dataset and Baseline Temporal Model for Early Drowsiness Detection," CVPR Workshops, 2019 (UTA-RLDD).
 7. N. Petrellis et al., "NITYMED: Night-Time Yawning-Microsleep-Eyeblink-driver Distraction," IEEE DataPort, 2022, doi:10.21227/85xe-3f88.
+8. Bodaghi et al., UL-DD driver drowsiness dataset, Scientific Data 13, 506, 2026, doi:10.1038/s41597-025-06540-1.
 
 The datasets are used for non-commercial academic evaluation under their own terms and are not redistributed with this repository.
 
