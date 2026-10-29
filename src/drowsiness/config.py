@@ -86,15 +86,17 @@ class CalibrationConfig:
     max_open_ear: float = 0.45
     max_neutral_pitch_deg: float = 25.0
     max_attempts: int = 3
-    # The open-eye EAR can only go up after calibration: once the driver's eyes
-    # are seen open wider than at calibration (the ``rise_percentile`` of EAR
-    # over the last ``rise_window_s``, within the plausibility limits above),
-    # that becomes the open-eye EAR. A drowsy driver often starts with drooping
-    # eyes, which set the "closed" bar too low; on UL-DD (real drowsiness, KSS
-    # ratings) this raised frame-level F1 from 54% to 61% for drivers whose
-    # settings were chosen on the others (tools/evaluation_report.py). It never
-    # goes down, so growing drowsiness cannot lower the bar.
-    open_ear_rises: bool = True
+    # Optional: let the open-eye EAR rise after calibration. Once the eyes are
+    # seen open wider than at calibration (the ``rise_percentile`` of EAR over
+    # the last ``rise_window_s``, within the plausibility limits above), that
+    # becomes the open-eye EAR; it never goes down. Meant for drivers who
+    # calibrate with drooping eyes. Off by default: on UL-DD (real drowsiness,
+    # KSS ratings) it raised per-frame F1 from 54% to 61%, but it raises the
+    # bar for alert drivers too (time warned in awake sessions 9% -> 20%), so
+    # 4-minute-window accuracy fell from 78% to 69% and session accuracy from
+    # 90% to 83%; NTHU-DDD F1 81.0% -> 80.5%, UTA-RLDD AUC 0.861 -> 0.840.
+    # Gentler percentiles and longer windows traded the same way.
+    open_ear_rises: bool = False
     rise_window_s: float = 60.0
     rise_percentile: float = 90.0
 

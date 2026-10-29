@@ -377,7 +377,26 @@ def ulldd(df: pd.DataFrame) -> list[str]:
                     "false alarms": pct(m["false_alarm_rate"]),
                 }
             )
-    out += [table(pd.DataFrame(rows)), ""]
+
+    # Frames with no visible sign: no cue stands out from an alert driver's
+    # (PERCLOS within the alert frames' 90th percentile, no yawn, no head tilt,
+    # eyes open now). No camera-based rule can flag these without also
+    # flagging alert drivers, which caps the frame-level recall.
+    alert = frames[frames["kss"] <= 3]
+    limit = alert["perclos"].quantile(0.9)
+
+    def quiet(f: pd.DataFrame) -> float:
+        no_sign = (f["perclos"] <= limit) & (f["yawn_score"] == 0) & (f["head_score"] == 0)
+        return float((no_sign & (f["eyes_closed"] == 0)).mean())
+
+    out += [
+        table(pd.DataFrame(rows)),
+        "",
+        f"Frames with no visible sign (PERCLOS <= {limit:.3f}, the 90th percentile of KSS <= 3 "
+        f"frames; no yawn; no head tilt; eyes open): {pct(quiet(frames[frames['kss'] >= 7]))} "
+        f"of KSS >= 7 frames, {pct(quiet(alert))} of KSS <= 3 frames.",
+        "",
+    ]
     return out
 
 

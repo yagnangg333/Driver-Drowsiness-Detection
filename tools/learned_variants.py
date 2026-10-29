@@ -9,6 +9,10 @@ and 12 UTA subjects). Reported:
 - UTA-RLDD: AUC of drowsy (10) vs alert (0) videos, mean probability
 - YawDD awake clips with a warning, NITYMED microsleep videos with an alarm
   (model trained on all of its training data)
+- UL-DD (never used for training): AUC of drowsy vs awake sessions (mean
+  probability), and accuracy and F1 per 4-minute window rated KSS >= 7, with
+  the warned-share threshold chosen on the other drivers as in
+  ``tools/evaluation_report.py``
 
     python tools/learned_variants.py
     python tools/learned_variants.py --save models/learned_fusion.json
@@ -27,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
+import evaluation_report as er
 import learned_fusion as lf
 
 from drowsiness.evaluation import binary_metrics, roc_auc
@@ -42,6 +47,9 @@ REFERENCE = {
     "UTA AUC": 0.861,
     "YawDD awake warned": 0.127,
     "night microsleep alarmed": 0.947,
+    "UL-DD AUC": 0.918,
+    "UL-DD window acc": 0.782,
+    "UL-DD window F1": 0.715,
 }
 ALL = list(range(len(FEATURES)))
 NO_EXPRESSION = [
@@ -74,6 +82,40 @@ def prepare() -> dict[str, list[pd.DataFrame]]:
         "uta": uta,
         "yawdd": [df for df in lf.load("yawdd") if df["action"].iloc[0] in ("normal", "talking")],
         "nitymed": [df for df in lf.load("nitymed") if df["category"].iloc[0] == "microsleep"],
+        "ulldd": with_kss(lf.load("ulldd")),
+    }
+
+
+def with_kss(recs: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """Each UL-DD frame gets its 4-minute window and that window's KSS rating."""
+    kss = er.kss_labels().set_index(["subject", "session", "window"])["kss"]
+    for df in recs:
+        df["window"] = (df["timestamp_s"] // er.KSS_WINDOW_S).astype(int)
+        idx = pd.MultiIndex.from_frame(df[["subject", "session", "window"]])
+        df["kss"] = kss.reindex(idx).to_numpy()
+    return recs
+
+
+def ulldd_checks(recs: list[pd.DataFrame], model, cols: list[int], t: float) -> dict:
+    drowsy, means, windows = [], [], []
+    for df in recs:
+        live = df["calibrating"].to_numpy() == 0
+        drowsy.append(df["session"].iloc[0] == "drowsy")
+        means.append(model.predict(df.attrs["x"][:, cols])[live].mean())
+        frames = df[["subject", "session", "window", "kss"]].assign(
+            warn=warn(df, model, cols, t) >= 1
+        )[live]
+        windows.append(frames.groupby(["subject", "session", "window"]).mean().reset_index())
+    w = pd.concat(windows, ignore_index=True).dropna(subset=["kss"])
+    sleepy = w["kss"] >= 7
+    pred = er.held_out_predictions(
+        w["warn"], sleepy, w["subject"], lambda v: np.quantile(v, np.linspace(0.05, 0.95, 91)), "f1"
+    )
+    m = binary_metrics(sleepy, pred)
+    return {
+        "UL-DD AUC": roc_auc(drowsy, means),
+        "UL-DD window acc": m["accuracy"],
+        "UL-DD window F1": m["f1"],
     }
 
 
@@ -143,6 +185,7 @@ def evaluate(data, name: str, cols: list[int], l2: float, use_uta: bool) -> dict
         "UTA AUC": roc_auc(uta_labels, uta_means),
         "YawDD awake warned": float(np.mean(awake)),
         "night microsleep alarmed": float(np.mean(night)),
+        **ulldd_checks(data["ulldd"], model, cols, t),
     }
 
 

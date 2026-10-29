@@ -99,13 +99,17 @@ def _track(tracker, seconds, ear, fps=15, start=0.0):
     return t, base
 
 
+def _rising(window_s):
+    return CalibrationConfig(open_ear_rises=True, rise_window_s=window_s)
+
+
 def _calibrated(ear=0.25):
     return Baseline(ear_threshold=ear * 0.6, ear=ear, pitch=3.0, calibrated=True)
 
 
 def test_open_ear_rises_once_eyes_are_seen_wider():
     # Calibrated on drooping eyes (0.25); the eyes later open to 0.30.
-    tracker = OpenEyeTracker(CalibrationConfig(rise_window_s=60.0), _calibrated(0.25))
+    tracker = OpenEyeTracker(_rising(60.0), _calibrated(0.25))
     t, base = _track(tracker, 59.0, 0.30)
     assert base.ear == pytest.approx(0.25)  # not before a full window
     _, base = _track(tracker, 2.0, 0.30, start=t)
@@ -115,21 +119,21 @@ def test_open_ear_rises_once_eyes_are_seen_wider():
 
 
 def test_open_ear_never_falls():
-    tracker = OpenEyeTracker(CalibrationConfig(rise_window_s=10.0), _calibrated(0.30))
+    tracker = OpenEyeTracker(_rising(10.0), _calibrated(0.30))
     _, base = _track(tracker, 60.0, 0.18)  # eyes drooping for a minute
     assert base.ear == pytest.approx(0.30)
     assert base.ear_threshold == pytest.approx(0.18)
 
 
 def test_implausible_open_ear_is_ignored():
-    config = CalibrationConfig(rise_window_s=10.0)
+    config = _rising(10.0)
     tracker = OpenEyeTracker(config, _calibrated(0.30))
     _, base = _track(tracker, 30.0, config.max_open_ear + 0.05)
     assert base.ear == pytest.approx(0.30)
 
 
 def test_failed_calibration_is_replaced_by_a_plausible_open_ear():
-    tracker = OpenEyeTracker(CalibrationConfig(rise_window_s=10.0), Baseline(ear_threshold=0.21))
+    tracker = OpenEyeTracker(_rising(10.0), Baseline(ear_threshold=0.21))
     t, base = _track(tracker, 30.0, 0.15)  # eyes still look closed: keep the default
     assert base.ear_threshold == 0.21 and base.ear is None
     _, base = _track(tracker, 15.0, 0.28, start=t)
@@ -139,16 +143,14 @@ def test_failed_calibration_is_replaced_by_a_plausible_open_ear():
 
 def test_reset_returns_to_the_calibrated_baseline():
     calibrated = _calibrated(0.25)
-    tracker = OpenEyeTracker(CalibrationConfig(rise_window_s=10.0), calibrated)
+    tracker = OpenEyeTracker(_rising(10.0), calibrated)
     _track(tracker, 20.0, 0.30)
     assert tracker.baseline.ear == pytest.approx(0.30)
     tracker.reset()
     assert tracker.baseline == calibrated
 
 
-def test_rising_can_be_switched_off():
-    tracker = OpenEyeTracker(
-        CalibrationConfig(rise_window_s=10.0, open_ear_rises=False), _calibrated(0.25)
-    )
+def test_rising_is_off_by_default():
+    tracker = OpenEyeTracker(CalibrationConfig(rise_window_s=10.0), _calibrated(0.25))
     _, base = _track(tracker, 30.0, 0.32)
     assert base == _calibrated(0.25)
