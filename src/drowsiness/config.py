@@ -86,9 +86,22 @@ class CalibrationConfig:
     max_open_ear: float = 0.45
     max_neutral_pitch_deg: float = 25.0
     max_attempts: int = 3
+    # The open-eye EAR can only go up after calibration: once the driver's eyes
+    # are seen open wider than at calibration (the ``rise_percentile`` of EAR
+    # over the last ``rise_window_s``, within the plausibility limits above),
+    # that becomes the open-eye EAR. A drowsy driver often starts with drooping
+    # eyes, which set the "closed" bar too low; on UL-DD (real drowsiness, KSS
+    # ratings) this raised frame-level F1 from 54% to 61% for drivers whose
+    # settings were chosen on the others (tools/evaluation_report.py). It never
+    # goes down, so growing drowsiness cannot lower the bar.
+    open_ear_rises: bool = True
+    rise_window_s: float = 60.0
+    rise_percentile: float = 90.0
 
     def __post_init__(self) -> None:
         _require_positive("calibration", self, "duration_s", "min_samples", "max_attempts")
+        _require_positive("calibration", self, "rise_window_s")
+        _require(0 < self.rise_percentile <= 100, "calibration.rise_percentile must be in (0, 100]")
         _require(
             0 < self.ear_closed_ratio < 1, "calibration.ear_closed_ratio must be between 0 and 1"
         )

@@ -252,6 +252,20 @@ def kss_labels() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def held_out_predictions(
+    values: pd.Series, labels: pd.Series, subjects: pd.Series, candidates, metric: str
+) -> np.ndarray:
+    """values > threshold, where each driver's threshold is the one with the best
+    ``metric`` on the other drivers (it never sees the driver it scores)."""
+    pred = np.zeros(len(values), bool)
+    for held in subjects.unique():
+        test = (subjects == held).to_numpy()
+        train_v, train_y = values[~test], labels[~test]
+        best = max(candidates(train_v), key=lambda t: binary_metrics(train_y, train_v > t)[metric])
+        pred[test] = values[test] > best
+    return pred
+
+
 def ulldd(df: pd.DataFrame) -> list[str]:
     out = [
         "## UL-DD (infrared face video; awake and drowsy sessions; KSS every 4 minutes)",
@@ -316,6 +330,54 @@ def ulldd(df: pd.DataFrame) -> list[str]:
         f"{len(win)} four-minute windows matched to a KSS rating.",
         "",
     ]
+
+    # Accuracy and F1 at three levels; "drowsy" = the window's KSS >= 7, or the
+    # drowsy session. A KSS rating describes four minutes, so per frame many
+    # "drowsy" frames show no sign at all; the window is the label's own unit.
+    frames = d.merge(kss, on=["subject", "session", "window"])
+    warned = d.assign(**{s: d[f"{s}_level"] >= 1 for s in STRATEGIES})
+    win_warned = warned.groupby(["subject", "session", "window"])[list(STRATEGIES)].mean()
+    win_warned = win_warned.reset_index().merge(kss, on=["subject", "session", "window"])
+    rows = []
+    for s in STRATEGIES:
+        levels = {
+            "per frame (warning)": (frames["kss"] >= 7, frames[f"{s}_level"] >= 1),
+            "per 4-minute window (warned share, threshold held out)": (
+                win_warned["kss"] >= 7,
+                held_out_predictions(
+                    win_warned[s],
+                    win_warned["kss"] >= 7,
+                    win_warned["subject"],
+                    lambda v: np.quantile(v, np.linspace(0.05, 0.95, 91)),
+                    "f1",
+                ),
+            ),
+            "per session (time in alert, threshold held out)": (
+                drowsy,
+                held_out_predictions(
+                    per[f"{s}_alert_time"],
+                    drowsy,
+                    per["subject"],
+                    lambda v: np.linspace(0, 1, 101),
+                    "accuracy",
+                ),
+            ),
+        }
+        for level, (y, pred) in levels.items():
+            m = binary_metrics(y, pred)
+            rows.append(
+                {
+                    "fusion": s,
+                    "level": level,
+                    "n": len(y),
+                    "accuracy": pct(m["accuracy"]),
+                    "F1": pct(m["f1"]),
+                    "precision": pct(m["precision"]),
+                    "recall": pct(m["recall"]),
+                    "false alarms": pct(m["false_alarm_rate"]),
+                }
+            )
+    out += [table(pd.DataFrame(rows)), ""]
     return out
 
 

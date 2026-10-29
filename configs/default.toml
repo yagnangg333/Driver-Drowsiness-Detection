@@ -30,6 +30,11 @@ min_open_ear = 0.20                 # lower = eyes were probably closed/drowsy
 max_open_ear = 0.45
 max_neutral_pitch_deg = 25.0        # larger = driver was looking down/up
 max_attempts = 3
+# After calibration the open-eye EAR can only rise: to the 90th percentile of
+# EAR over the last 60 s, once that is higher and within the limits above.
+open_ear_rises = true
+rise_window_s = 60.0
+rise_percentile = 90.0
 
 [indicators]
 default_ear_threshold = 0.21        # used when calibration is off or fails

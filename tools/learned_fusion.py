@@ -35,7 +35,13 @@ CFG = AppConfig()
 def features(df: pd.DataFrame, config: AppConfig = CFG) -> np.ndarray:
     """Feature matrix for one recording, frame by frame, causally."""
     threshold, pitch0, _ = df.attrs.get("baseline") or replay.baseline(df, config)
-    open_ear = threshold / config.calibration.ear_closed_ratio
+    # The open-eye EAR in use at each frame: it can rise after calibration, and
+    # the pipeline records its threshold (older runs did not: then it is fixed).
+    if "ear_threshold" in df and df["ear_threshold"].notna().any():
+        thresholds = df["ear_threshold"].ffill().fillna(threshold).to_numpy()
+    else:
+        thresholds = np.full(len(df), threshold)
+    open_ears = thresholds / config.calibration.ear_closed_ratio
     tracker = FeatureTracker()
     smile = df["bs_mouthSmile"].fillna(0).to_numpy()
     rows = []
@@ -45,7 +51,7 @@ def features(df: pd.DataFrame, config: AppConfig = CFG) -> np.ndarray:
                 r.timestamp_s,
                 face=bool(r.face_detected),
                 closed=bool(r.eyes_closed),
-                ear_rel=r.ear / open_ear if r.face_detected else float("nan"),
+                ear_rel=r.ear / open_ears[i] if r.face_detected else float("nan"),
                 mar=r.mar if r.face_detected else float("nan"),
                 yawn_score=r.yawn_score,
                 head_score=r.head_score,
