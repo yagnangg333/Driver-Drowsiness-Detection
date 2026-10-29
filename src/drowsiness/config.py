@@ -86,9 +86,24 @@ class CalibrationConfig:
     max_open_ear: float = 0.45
     max_neutral_pitch_deg: float = 25.0
     max_attempts: int = 3
+    # Optional: let the open-eye EAR rise after calibration. Once the eyes are
+    # seen open wider than at calibration (the ``rise_percentile`` of EAR over
+    # the last ``rise_window_s``, within the plausibility limits above), that
+    # becomes the open-eye EAR; it never goes down. Meant for drivers who
+    # calibrate with drooping eyes. Off by default: on UL-DD (real drowsiness,
+    # KSS ratings) it raised per-frame F1 from 54% to 61%, but it raises the
+    # bar for alert drivers too (time warned in awake sessions 9% -> 20%), so
+    # 4-minute-window accuracy fell from 78% to 69% and session accuracy from
+    # 90% to 83%; NTHU-DDD F1 81.0% -> 80.5%, UTA-RLDD AUC 0.861 -> 0.840.
+    # Gentler percentiles and longer windows traded the same way.
+    open_ear_rises: bool = False
+    rise_window_s: float = 60.0
+    rise_percentile: float = 90.0
 
     def __post_init__(self) -> None:
         _require_positive("calibration", self, "duration_s", "min_samples", "max_attempts")
+        _require_positive("calibration", self, "rise_window_s")
+        _require(0 < self.rise_percentile <= 100, "calibration.rise_percentile must be in (0, 100]")
         _require(
             0 < self.ear_closed_ratio < 1, "calibration.ear_closed_ratio must be between 0 and 1"
         )

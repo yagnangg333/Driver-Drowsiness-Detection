@@ -224,13 +224,196 @@ def yawdd(df: pd.DataFrame) -> list[str]:
     return out
 
 
+# --- UL-DD: awake and drowsy sessions, KSS every 4 minutes -----------------------
+
+KSS_WINDOW_S = 240.0  # one self-reported KSS rating per 4 minutes, 10 per session
+
+
+def spearman(a, b) -> float:
+    """Rank correlation (Pearson on ranks; scipy is not a dependency)."""
+    return float(np.corrcoef(pd.Series(a).rank(), pd.Series(b).rank())[0, 1])
+
+
+def kss_labels() -> pd.DataFrame:
+    """One row per (subject, session, window) with the KSS rating for that window."""
+    raw = pd.read_csv(PROJECT_ROOT / "data" / "UL-DD" / "Labels.csv", header=None)
+    rows = []
+    for _, r in raw.iterrows():
+        subject, session = r[0].split("_")
+        for window, kss in enumerate(r[1:].dropna()):
+            rows.append(
+                {
+                    "subject": subject,
+                    "session": session.lower().replace("alert", "awake"),
+                    "window": window,
+                    "kss": float(kss),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def held_out_predictions(
+    values: pd.Series, labels: pd.Series, subjects: pd.Series, candidates, metric: str
+) -> np.ndarray:
+    """values > threshold, where each driver's threshold is the one with the best
+    ``metric`` on the other drivers (it never sees the driver it scores)."""
+    pred = np.zeros(len(values), bool)
+    for held in subjects.unique():
+        test = (subjects == held).to_numpy()
+        train_v, train_y = values[~test], labels[~test]
+        best = max(candidates(train_v), key=lambda t: binary_metrics(train_y, train_v > t)[metric])
+        pred[test] = values[test] > best
+    return pred
+
+
+def ulldd(df: pd.DataFrame) -> list[str]:
+    out = [
+        "## UL-DD (infrared face video; awake and drowsy sessions; KSS every 4 minutes)",
+        conditions_line(df),
+        "",
+    ]
+    d = df[df["calibrating"] == 0].copy()
+    per = d.groupby("recording").agg(subject=("subject", "first"), session=("session", "first"))
+    for s in STRATEGIES:
+        g = d.groupby("recording")
+        per[f"{s}_alert_time"] = g[f"{s}_level"].apply(lambda x: (x >= 1).mean())
+        per[f"{s}_mean_score"] = g[f"{s}_score"].mean()
+    kss = kss_labels()
+    session_kss = kss.groupby(["subject", "session"])["kss"].mean()
+
+    rows = []
+    for session, g in per.groupby("session"):
+        row = {
+            "session": session,
+            "videos": len(g),
+            "mean KSS": f"{session_kss.loc[:, session].mean():.1f}",
+        }
+        for s in STRATEGIES:
+            row[f"{s}: time in alert"] = pct(g[f"{s}_alert_time"].mean())
+            row[f"{s}: mean score"] = f"{g[f'{s}_mean_score'].mean():.3f}"
+        rows.append(row)
+    out += [table(pd.DataFrame(rows)), ""]
+
+    # Score per 4-minute window, matched to the KSS rating given for that window.
+    d["window"] = (d["timestamp_s"] // KSS_WINDOW_S).astype(int)
+    win = d.groupby(["subject", "session", "window"])[[f"{s}_score" for s in STRATEGIES]].mean()
+    win = win.reset_index().merge(kss, on=["subject", "session", "window"])
+    drowsy = per["session"] == "drowsy"
+    rows = []
+    for s in STRATEGIES:
+        wide = per.pivot(index="subject", columns="session", values=f"{s}_mean_score").dropna()
+        higher = int((wide["drowsy"] > wide["awake"]).sum())
+        within = [
+            spearman(g["kss"], g[f"{s}_score"])
+            for _, g in win.groupby("subject")
+            if g["kss"].nunique() > 1
+        ]
+        score, alert_time, win_score = (
+            per[f"{s}_mean_score"],
+            per[f"{s}_alert_time"],
+            win[f"{s}_score"],
+        )
+        rows.append(
+            {
+                "fusion": s,
+                "AUC drowsy vs awake (mean score)": f"{roc_auc(drowsy, score):.3f}",
+                "AUC drowsy vs awake (time in alert)": f"{roc_auc(drowsy, alert_time):.3f}",
+                "drowsy session scores higher": f"{higher}/{len(wide)} subjects",
+                "Spearman score vs KSS (all windows)": f"{spearman(win['kss'], win_score):.2f}",
+                "Spearman within subject (median)": f"{np.median(within):.2f}",
+                "AUC KSS >= 7 windows": f"{roc_auc(win['kss'] >= 7, win_score):.3f}",
+            }
+        )
+    out += [
+        table(pd.DataFrame(rows)),
+        "",
+        f"{len(win)} four-minute windows matched to a KSS rating.",
+        "",
+    ]
+
+    # Accuracy and F1 at three levels; "drowsy" = the window's KSS >= 7, or the
+    # drowsy session. A KSS rating describes four minutes, so per frame many
+    # "drowsy" frames show no sign at all; the window is the label's own unit.
+    frames = d.merge(kss, on=["subject", "session", "window"])
+    warned = d.assign(**{s: d[f"{s}_level"] >= 1 for s in STRATEGIES})
+    win_warned = warned.groupby(["subject", "session", "window"])[list(STRATEGIES)].mean()
+    win_warned = win_warned.reset_index().merge(kss, on=["subject", "session", "window"])
+    rows = []
+    for s in STRATEGIES:
+        levels = {
+            "per frame (warning)": (frames["kss"] >= 7, frames[f"{s}_level"] >= 1),
+            "per 4-minute window (warned share, threshold held out)": (
+                win_warned["kss"] >= 7,
+                held_out_predictions(
+                    win_warned[s],
+                    win_warned["kss"] >= 7,
+                    win_warned["subject"],
+                    lambda v: np.quantile(v, np.linspace(0.05, 0.95, 91)),
+                    "f1",
+                ),
+            ),
+            "per session (time in alert, threshold held out)": (
+                drowsy,
+                held_out_predictions(
+                    per[f"{s}_alert_time"],
+                    drowsy,
+                    per["subject"],
+                    lambda v: np.linspace(0, 1, 101),
+                    "accuracy",
+                ),
+            ),
+        }
+        for level, (y, pred) in levels.items():
+            m = binary_metrics(y, pred)
+            rows.append(
+                {
+                    "fusion": s,
+                    "level": level,
+                    "n": len(y),
+                    "accuracy": pct(m["accuracy"]),
+                    "F1": pct(m["f1"]),
+                    "precision": pct(m["precision"]),
+                    "recall": pct(m["recall"]),
+                    "false alarms": pct(m["false_alarm_rate"]),
+                }
+            )
+
+    # Frames with no visible sign: no cue stands out from an alert driver's
+    # (PERCLOS within the alert frames' 90th percentile, no yawn, no head tilt,
+    # eyes open now). No camera-based rule can flag these without also
+    # flagging alert drivers, which caps the frame-level recall.
+    alert = frames[frames["kss"] <= 3]
+    limit = alert["perclos"].quantile(0.9)
+
+    def quiet(f: pd.DataFrame) -> float:
+        no_sign = (f["perclos"] <= limit) & (f["yawn_score"] == 0) & (f["head_score"] == 0)
+        return float((no_sign & (f["eyes_closed"] == 0)).mean())
+
+    out += [
+        table(pd.DataFrame(rows)),
+        "",
+        f"Frames with no visible sign (PERCLOS <= {limit:.3f}, the 90th percentile of KSS <= 3 "
+        f"frames; no yawn; no head tilt; eyes open): {pct(quiet(frames[frames['kss'] >= 7]))} "
+        f"of KSS >= 7 frames, {pct(quiet(alert))} of KSS <= 3 frames.",
+        "",
+    ]
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=EVAL / "results.md")
     args = parser.parse_args(argv)
 
     lines = ["# Phase 4 results: static vs adaptive fusion", ""]
-    for name, section in (("nthu", nthu), ("uta", uta), ("nitymed", nitymed), ("yawdd", yawdd)):
+    sections = (
+        ("nthu", nthu),
+        ("uta", uta),
+        ("nitymed", nitymed),
+        ("yawdd", yawdd),
+        ("ulldd", ulldd),
+    )
+    for name, section in sections:
         df = load(name)
         lines += section(df) if not df.empty else [f"## {name}: no results yet", ""]
     text = "\n".join(lines)

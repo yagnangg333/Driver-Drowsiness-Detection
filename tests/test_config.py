@@ -41,6 +41,8 @@ def test_int_accepted_for_float():
         ({"indicators": {"default_ear_threshold": -1.0}}, "default_ear_threshold"),
         ({"calibration": {"min_samples": 0}}, "min_samples must be > 0"),
         ({"calibration": {"duration_s": 0.0}}, "duration_s must be > 0"),
+        ({"calibration": {"rise_window_s": 0.0}}, "rise_window_s must be > 0"),
+        ({"calibration": {"rise_percentile": 0.0}}, "rise_percentile"),
         ({"alerts": {"hysteresis": -1.0}}, "hysteresis"),
         ({"alerts": {"level1_hold_s": -1.0}}, "level1_hold_s"),
         ({"alerts": {"no_face_alarm_s": 2.0}}, "no_face_warning_s < no_face_alarm_s"),

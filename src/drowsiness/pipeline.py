@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from drowsiness.alerts import AlertEvent, AlertLevel, AlertManager
-from drowsiness.calibration import Baseline, Calibrator
+from drowsiness.calibration import Baseline, Calibrator, OpenEyeTracker
 from drowsiness.config import AppConfig
 from drowsiness.fusion import (
     AdaptiveFusion,
@@ -102,6 +102,7 @@ class FrameReport:
             "face_detected": int(self.face_detected),
             "calibrating": int(self.calibrating),
             "ear": s.ear if s else nan,
+            "ear_threshold": self.baseline.ear_threshold if self.baseline else nan,
             "mar": s.mar if s else nan,
             "pitch": pose.pitch if pose else nan,
             "yaw": pose.yaw if pose else nan,
@@ -185,13 +186,16 @@ class DrowsinessPipeline:
 
     @property
     def baseline(self) -> Baseline | None:
-        return self._calibrator.result
+        """The baseline in use: the calibrated one, with the open-eye EAR raised
+        if the eyes have since been seen open wider."""
+        return self._open_eye.baseline if self._open_eye else self._calibrator.result
 
     def recalibrate(self) -> None:
         """Restart calibration and clear all temporal state."""
         self._calibrator = Calibrator(
             self.config.calibration, self.config.indicators.default_ear_threshold
         )
+        self._open_eye: OpenEyeTracker | None = None
         self.reset_tracking()
 
     def reset_tracking(self) -> None:
@@ -205,6 +209,8 @@ class DrowsinessPipeline:
         for fusion in (self._static, self._adaptive, self.fusion):
             fusion.reset()
         self._conditions.reset()
+        if self._open_eye:
+            self._open_eye.reset()
         self._static_alerts.reset()
         self._adaptive_alerts.reset()
         self._face_missing_since: float | None = None
@@ -227,7 +233,9 @@ class DrowsinessPipeline:
             self._calibrator.update(timestamp, signals, measured.smile if measured else None)
         elif signals is not None:
             self._face_missing_since = None
-            self._update_indicators(timestamp, signals, self._calibrator.result, conditions)
+            if self._open_eye is None:
+                self._open_eye = OpenEyeTracker(self.config.calibration, self._calibrator.result)
+            self._update_indicators(timestamp, signals, conditions)
         else:
             self._handle_missing_face(timestamp)
 
@@ -271,7 +279,7 @@ class DrowsinessPipeline:
             calibrating=calibrating,
             calibration_progress=self._calibrator.progress,
             calibration_note=self._calibrator.note,
-            baseline=self._calibrator.result,
+            baseline=self.baseline,
             eye=eye,
             yawn=self._yawn.state,
             head=self._head.state,
@@ -304,9 +312,9 @@ class DrowsinessPipeline:
             for indicator in self._indicators:
                 indicator.face_lost(t)
 
-    def _update_indicators(
-        self, t: float, signals: FaceSignals, baseline: Baseline, conditions: Conditions
-    ) -> None:
+    def _update_indicators(self, t: float, signals: FaceSignals, conditions: Conditions) -> None:
+        assert self._open_eye is not None
+        baseline = self._open_eye.update(t, signals.ear)
         closed = signals.ear < baseline.ear_threshold
         self._eye_static.update(t, closed)
         # A smile narrows the eyes without drowsiness: not an eye closure.

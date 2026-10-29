@@ -7,7 +7,8 @@ change to thresholds or rules can be evaluated on every dataset in minutes
 instead of re-running face tracking for hours.
 
 The calibration baseline is not stored per frame; it is rebuilt the way the
-pipeline builds it (medians over the calibration frames), so with default
+pipeline builds it (medians over the calibration frames), and the open-eye EAR
+then rises exactly as in the pipeline (``OpenEyeTracker``), so with default
 settings the simulation closely reproduces the pipeline (see ``validate``).
 """
 
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from drowsiness.calibration import Baseline, OpenEyeTracker, ear_threshold
 from drowsiness.config import PROJECT_ROOT, AppConfig
 from drowsiness.evaluation import replay_alerts
 from drowsiness.fusion import AdaptiveFusion, IndicatorScores, StaticFusion
@@ -83,16 +85,23 @@ def resting_smile(df: pd.DataFrame, config: AppConfig) -> float | None:
     return float(src["bs_mouthSmile"].median())
 
 
-def baseline(df: pd.DataFrame, config: AppConfig) -> tuple[float, float, float]:
-    """(EAR threshold, neutral pitch, neutral roll) as calibration would set them."""
+def open_ear(df: pd.DataFrame, config: AppConfig) -> float | None:
+    """The calibrated open-eye EAR, or None if calibration fell back to defaults."""
     cal = config.calibration
     src = _calibration_frames(df, config)
     if len(src) < 5:
-        return config.indicators.default_ear_threshold, 0.0, 0.0
+        return None
     ear = float(src["ear"].median())
-    if not cal.min_open_ear <= ear <= cal.max_open_ear:
+    return ear if cal.min_open_ear <= ear <= cal.max_open_ear else None
+
+
+def baseline(df: pd.DataFrame, config: AppConfig) -> tuple[float, float, float]:
+    """(EAR threshold, neutral pitch, neutral roll) as calibration would set them."""
+    ear = open_ear(df, config)
+    if ear is None:
         return config.indicators.default_ear_threshold, 0.0, 0.0
-    threshold = min(max(ear * cal.ear_closed_ratio, cal.min_ear_threshold), cal.max_ear_threshold)
+    src = _calibration_frames(df, config)
+    threshold = ear_threshold(ear, config.calibration)
     return threshold, float(src["pitch"].median()), float(src["roll"].median())
 
 
@@ -105,11 +114,16 @@ def simulate(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     """Per-frame scores and alert levels for both strategies."""
     cfg = settings.config
     ind = cfg.indicators
-    ear_threshold, pitch0, roll0 = baseline(df, cfg)
+    threshold0, pitch0, roll0 = baseline(df, cfg)
+    opened = open_ear(df, cfg)
     if "behaviour" in df and df["behaviour"].iloc[0] != "nonsleepyCombination":
         # NTHU: every recording of a subject uses the non-sleepy calibration;
         # the caller passes it in via df.attrs when available.
-        ear_threshold, pitch0, roll0 = df.attrs.get("baseline", (ear_threshold, pitch0, roll0))
+        threshold0, pitch0, roll0 = df.attrs.get("baseline", (threshold0, pitch0, roll0))
+        opened = df.attrs.get("open_ear", opened)
+    open_eye = OpenEyeTracker(
+        cfg.calibration, Baseline(threshold0, ear=opened, calibrated=opened is not None)
+    )
 
     eye_args = (ind.perclos_window_s, ind.perclos_max, ind.microsleep_s, ind.closure_debounce_s)
     eye_s, eye_a = EyeClosureIndicator(*eye_args), EyeClosureIndicator(*eye_args)
@@ -177,7 +191,8 @@ def simulate(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
         if not calib:
             if face:
                 missing_since = None
-                closed = ear < ear_threshold and not ignore
+                threshold = open_eye.update(t, ear).ear_threshold
+                closed = ear < threshold and not ignore
                 eye_s.update(t, closed)
                 eye_a.update(t, closed and not smile)
                 yawn.update(t, y)
@@ -217,12 +232,17 @@ def with_nthu_baselines(recordings: list[pd.DataFrame], config: AppConfig) -> No
     by_subject = {}
     for df in recordings:
         if "behaviour" in df and df["behaviour"].iloc[0] == "nonsleepyCombination":
-            by_subject[df["recording"].iloc[0]] = (baseline(df, config), resting_smile(df, config))
+            by_subject[df["recording"].iloc[0]] = (
+                baseline(df, config),
+                resting_smile(df, config),
+                open_ear(df, config),
+            )
     for df in recordings:
         if "behaviour" in df:
-            base, smile = by_subject.get(df["recording"].iloc[0], (None, None))
+            base, smile, opened = by_subject.get(df["recording"].iloc[0], (None, None, None))
             df.attrs["baseline"] = base
             df.attrs["resting_smile"] = smile
+            df.attrs["open_ear"] = opened
 
 
 def configure(config: AppConfig, **sections: dict) -> AppConfig:
@@ -251,5 +271,5 @@ def validate(dataset: str) -> float:
 
 
 if __name__ == "__main__":
-    for name in ("uta", "nthu", "yawdd", "nitymed"):
+    for name in ("uta", "nthu", "yawdd", "nitymed", "ulldd"):
         print(name, f"simulated alerts match the pipeline on {validate(name):.2%} of frames")

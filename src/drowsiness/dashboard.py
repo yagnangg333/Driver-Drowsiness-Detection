@@ -53,12 +53,12 @@ LEARNED_MODEL = "models/learned_fusion.json"  # written by tools/learned_variant
 # never saw them.
 LEARNED_RESULTS = pd.DataFrame(
     [
-        ("Rule-based adaptive (ours, used)", "82.7%", "18.4%", "0.861", "94.7%"),
-        ("Learned on NTHU-DDD (this model)", "76.8%", "27.8%", "0.458", "84.2%"),
-        ("Learned, no smile/condition features", "72.3%", "29.7%", "0.917", "84.2%"),
-        ("Learned on NTHU-DDD + UTA-RLDD", "77.0%", "27.0%", "0.597", "100%"),
+        ("Rule-based adaptive (ours, used)", "82.7%", "18.4%", "0.861", "94.7%", "78.2%"),
+        ("Learned on NTHU-DDD (this model)", "76.8%", "27.8%", "0.458", "84.2%", "61.6%"),
+        ("Learned, no smile/condition features", "72.3%", "29.7%", "0.917", "84.2%", "74.0%"),
+        ("Learned on NTHU-DDD + UTA-RLDD", "77.0%", "27.0%", "0.597", "100%", "38.4%"),
     ],
-    columns=["Fusion", "F1", "False alarms", "UTA AUC", "Night alarms"],
+    columns=["Fusion", "F1", "False alarms", "UTA AUC", "Night alarms", "UL-DD windows"],
 )
 _LEVEL_NAMES = {
     AlertLevel.NONE: "Normal",
@@ -512,7 +512,8 @@ def _trained_model_section(model: LogisticModel | None) -> None:
     st.dataframe(LEARNED_RESULTS, hide_index=True, use_container_width=True)
     st.caption(
         "F1 and false alarms on NTHU-DDD; UTA AUC on real tiredness (UTA-RLDD); night "
-        "alarms on NITYMED microsleep videos. With four acted subjects the model learned "
+        "alarms on NITYMED microsleep videos; UL-DD windows: 4-minute windows of real "
+        "drowsiness classified correctly. With four acted subjects the model learned "
         'habits of its training data ("smiling means alert") that did not transfer to real '
         "tiredness, so the explainable rule-based fusion drives the alarm."
     )
