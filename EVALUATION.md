@@ -106,7 +106,7 @@ The occlusion check was tuned to flag at most 3% of single frames of uncovered e
 ## What the evaluation changed
 
 - **Low light does not weaken the eye cue.** The original plan lowered the eye weight in low light. On NITYMED, eye-measurement noise was 0.8% at night against 0.7% by day, and night "eyes closed" readings were real closures on inspection. Lowering the eye weight only discarded evidence: night microsleep videos raising an alarm fell from 94.7% to 84.2%. Low light now keeps the normal weights.
-- **Facial expressions cause most false alarms.** On NTHU-DDD, 28% of eye-closed frames were in non-drowsy footage, and 83% of those came from talking and laughing, where the smile score separated them cleanly from real closures. Tested leave-one-subject-out, ignoring closures while smiling helps every subject, with recall unchanged.
+- **Facial expressions cause most false alarms.** On NTHU-DDD, 28% of eye-closed frames (1,481 of 5,237, before the smile rule) were in non-drowsy footage, and 83% of those came from talking and laughing, where the smile score separated them cleanly from real closures. With the smile rule, the eye-closed frames in non-drowsy footage fell to 865 (−42%). Tested leave-one-subject-out, ignoring closures while smiling helps every subject, with recall unchanged.
 - **Smiles are judged against the driver's resting face.** Some faces and camera angles score above 0.10 at rest. Without a per-driver margin, 21 of 105 YawDD normal-driving clips read as "smiling" most of the time, so those drivers' eye closures would have been ignored; with it, 5. The price is more false warnings on talking clips (9% → 16%), accepted for safety.
 - **Yawns are partly read as smiles.** MediaPipe scores 36–54% of wide-open-mouth frames as smiles, which hid the eye closures that come with yawning. A recent wide-open mouth now counts as a yawn, not a smile.
 - **Yawn rule.** MAR above 0.45 for 1.0 s replaces 0.5 for 1.5 s. Chosen on half of the YawDD drivers, it caught 69% instead of 56% of yawns on the other half, with one false yawn in about 50 talking clips; on NITYMED, 2.34 instead of 1.76 of 3 yawns per video.
@@ -118,14 +118,14 @@ The occlusion check was tuned to flag at most 3% of single frames of uncovered e
 
 A logistic regression on 13 windowed features (eye-closure fractions, closure length, blinks, relative EAR, yawn and head scores, mouth opening, nodding, smile, conditions) was trained instead of hand-set weights ([`fusion/learned/`](src/drowsiness/fusion/learned), [`tools/learned_fusion.py`](tools/learned_fusion.py), [`tools/learned_variants.py`](tools/learned_variants.py)). Every subject was predicted by a model that never saw them. No variant beat the rule-based adaptive fusion overall:
 
-| Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed | UL-DD AUC | UL-DD window accuracy / F1 |
-|---|---|---|---|---|---|---|---|
-| **Rule-based adaptive (used)** | **82.7%** | **18.4%** | 0.861 | 12.7% | **94.7%** | **0.918** | **78.2% / 71.5%** |
-| Learned on NTHU-DDD, all features | 76.8% | 27.8% | 0.458 | 3.4% | 84.2% | 0.707 | 61.6% / 58.1% |
-| Learned on NTHU-DDD, without smile and conditions | 72.3% | 29.7% | **0.917** | 4.9% | 84.2% | 0.913 | 74.0% / 67.8% |
-| Learned on NTHU-DDD + UTA-RLDD, all features | 77.0% | 27.0% | 0.597 | 6.8% | 100% | 0.683 | 38.4% / 50.6% |
+| Variant (held-out subjects) | NTHU F1 | NTHU false alarms | UTA AUC | YawDD awake warned | Night microsleep alarmed | UL-DD AUC | UL-DD sessions | UL-DD window accuracy / F1 |
+|---|---|---|---|---|---|---|---|---|
+| **Rule-based adaptive (used)** | **82.7%** | **18.4%** | 0.861 | 12.7% | **94.7%** | **0.918** | **89.7%** | **78.2% / 71.5%** |
+| Learned on NTHU-DDD, all features | 76.8% | 27.8% | 0.458 | 3.4% | 84.2% | 0.707 | 79.3% | 61.6% / 58.1% |
+| Learned on NTHU-DDD, without smile and conditions | 72.3% | 29.7% | **0.917** | 4.9% | 84.2% | 0.913 | 86.2% | 74.0% / 67.8% |
+| Learned on NTHU-DDD + UTA-RLDD, all features | 77.0% | 27.0% | 0.597 | 6.8% | 100% | 0.683 | 58.6% | 38.4% / 50.6% |
 
-With four acted subjects the model learned the training set's habits (its largest weight says "smiling means alert") and did not transfer to real tiredness; each variant won on one dataset and lost on others. UL-DD, which no model saw, confirms it: the model the dashboard shows classifies 61.6% of 4-minute windows correctly against 78.2% for the rules. (A variant on the six indicator features alone, not in the table, reached a UL-DD AUC of 0.928 but 75.4% window accuracy and 76.2% NTHU F1.) The safety rules (microsleep and face loss) stay in the alert manager in every variant.
+With four acted subjects the model learned the training set's habits (its largest weight says "smiling means alert") and did not transfer to real tiredness; each variant won on one dataset and lost on others. UL-DD, which no model saw, confirms it: the model the dashboard shows classifies 23 of 29 sessions (79.3%) and 61.6% of 4-minute windows correctly, against 26 of 29 and 78.2% for the rules; it warns alert drivers less (6.0% of awake-session time against 9.4%) but misses much more drowsiness. (A variant on the six indicator features alone, not in the table, reached a UL-DD AUC of 0.928 but 75.4% window accuracy and 76.2% NTHU F1.) The safety rules (microsleep and face loss) stay in the alert manager in every variant.
 
 The dashboard runs the "NTHU-DDD, all features" model ([`models/learned_fusion.json`](models/learned_fusion.json), 0.07 ms per frame) live next to the two rule-based strategies, for comparison only, and shows its learned weights.
 

@@ -208,7 +208,7 @@ GitHub Actions runs lint and tests on Python 3.11 and 3.12 for every push to `ma
 5. S. Abtahi, M. Omidyeganeh, S. Shirmohammadi and B. Hariri, "YawDD: A Yawning Detection Dataset," Proc. ACM Multimedia Systems, 2014.
 6. R. Ghoddoosian, M. Galib and V. Athitsos, "A Realistic Dataset and Baseline Temporal Model for Early Drowsiness Detection," CVPR Workshops, 2019 (UTA-RLDD).
 7. N. Petrellis et al., "NITYMED: Night-Time Yawning-Microsleep-Eyeblink-driver Distraction," IEEE DataPort, 2022, doi:10.21227/85xe-3f88.
-8. Bodaghi et al., UL-DD driver drowsiness dataset, Scientific Data 13, 506, 2026, doi:10.1038/s41597-025-06540-1.
+8. M. Bodaghi et al., "A Multimodal Drowsiness Dataset Using Video, Biometric, and Behavioral Data," Scientific Data 13, 506, 2026 (UL-DD), doi:10.1038/s41597-025-06540-1.
 
 The datasets are used for non-commercial academic evaluation under their own terms and are not redistributed with this repository.
 
