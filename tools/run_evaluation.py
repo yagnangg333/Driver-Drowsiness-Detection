@@ -8,6 +8,7 @@ resumed. ``tools/evaluation_report.py`` turns these files into results.
 
     python tools/run_evaluation.py                  # all datasets
     python tools/run_evaluation.py --only nthu yawdd
+    python tools/run_evaluation.py --only ulldd     # UL-DD infrared videos
 
 Datasets are expected under ``data/`` as described in the README.
 """
@@ -40,6 +41,7 @@ DATA = PROJECT_ROOT / "data"
 OUT = DATA / "eval"
 NTHU_FPS = 30.0  # NTHU-DDD day scenarios were recorded at 30 fps
 UTA_STRIDE = 2  # 10-minute UTA videos: every 2nd frame (>= 7.5 fps) is plenty
+ULDD_STRIDE = 4  # 40-minute UL-DD videos at 60 fps: every 4th frame (15 fps)
 
 
 @dataclass
@@ -110,6 +112,23 @@ def uta_jobs() -> list[Job]:
                 {"subject": subject, "label": label},
                 video=path,
                 stride=UTA_STRIDE,
+            )
+        )
+    return jobs
+
+
+def ulldd_jobs() -> list[Job]:
+    """UL-DD infrared face videos; A = awake session, D = drowsy session."""
+    jobs = []
+    for path in sorted(glob.glob(str(DATA / "UL-DD" / "Video_Data" / "*" / "*" / "*_IR_*.mp4"))):
+        subject, session = Path(path).parts[-3], Path(path).parts[-2]
+        jobs.append(
+            Job(
+                "ulldd",
+                f"{subject}_{session}",
+                {"subject": subject, "session": {"A": "awake", "D": "drowsy"}[session]},
+                video=path,
+                stride=ULDD_STRIDE,
             )
         )
     return jobs
@@ -231,7 +250,13 @@ def process(job: Job) -> tuple[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    sources = {"nthu": nthu_jobs, "yawdd": yawdd_jobs, "nitymed": nitymed_jobs, "uta": uta_jobs}
+    sources = {
+        "nthu": nthu_jobs,
+        "yawdd": yawdd_jobs,
+        "nitymed": nitymed_jobs,
+        "uta": uta_jobs,
+        "ulldd": ulldd_jobs,
+    }
     parser.add_argument("--only", nargs="+", choices=sources, default=list(sources))
     parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     parser.add_argument("--redo", action="store_true", help="reprocess finished recordings")
@@ -240,8 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     jobs = [job for name in args.only for job in sources[name]()]
     todo = [job for job in jobs if args.redo or not job.out.exists()]
     print(f"{len(jobs)} recordings, {len(todo)} to process, {args.workers} workers", flush=True)
-    # Longest first, so a 10-minute video does not start last.
-    todo.sort(key=lambda j: (j.dataset != "uta", j.dataset != "nthu"))
+    # Longest first, so a 40-minute video does not start last.
+    todo.sort(key=lambda j: (j.dataset != "ulldd", j.dataset != "uta", j.dataset != "nthu"))
     started = time.monotonic()
     with Pool(args.workers) as pool:
         for i, (name, result) in enumerate(pool.imap_unordered(process, todo), start=1):
