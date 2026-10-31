@@ -10,9 +10,9 @@ and 12 UTA subjects). Reported:
 - YawDD awake clips with a warning, NITYMED microsleep videos with an alarm
   (model trained on all of its training data)
 - UL-DD (never used for training): AUC of drowsy vs awake sessions (mean
-  probability), and accuracy and F1 per 4-minute window rated KSS >= 7, with
-  the warned-share threshold chosen on the other drivers as in
-  ``tools/evaluation_report.py``
+  probability); sessions classified correctly and accuracy and F1 per 4-minute
+  window rated KSS >= 7, with thresholds chosen on the other drivers as in
+  ``tools/evaluation_report.py``; time warned in awake sessions
 
     python tools/learned_variants.py
     python tools/learned_variants.py --save models/learned_fusion.json
@@ -48,8 +48,10 @@ REFERENCE = {
     "YawDD awake warned": 0.127,
     "night microsleep alarmed": 0.947,
     "UL-DD AUC": 0.918,
+    "UL-DD sessions": 0.897,
     "UL-DD window acc": 0.782,
     "UL-DD window F1": 0.715,
+    "UL-DD awake warned": 0.094,
 }
 ALL = list(range(len(FEATURES)))
 NO_EXPRESSION = [
@@ -97,7 +99,7 @@ def with_kss(recs: list[pd.DataFrame]) -> list[pd.DataFrame]:
 
 
 def ulldd_checks(recs: list[pd.DataFrame], model, cols: list[int], t: float) -> dict:
-    drowsy, means, windows = [], [], []
+    drowsy, means, windows, alert_time = [], [], [], []
     for df in recs:
         live = df["calibrating"].to_numpy() == 0
         drowsy.append(df["session"].iloc[0] == "drowsy")
@@ -107,16 +109,25 @@ def ulldd_checks(recs: list[pd.DataFrame], model, cols: list[int], t: float) -> 
             {c: df[c].to_numpy() for c in ("subject", "session", "window", "kss")}
         ).assign(warn=warn(df, model, cols, t) >= 1)[live]
         windows.append(frames.groupby(["subject", "session", "window"]).mean().reset_index())
+        alert_time.append(frames["warn"].mean())
     w = pd.concat(windows, ignore_index=True).dropna(subset=["kss"])
     sleepy = w["kss"] >= 7
     pred = er.held_out_predictions(
         w["warn"], sleepy, w["subject"], lambda v: np.quantile(v, np.linspace(0.05, 0.95, 91)), "f1"
     )
     m = binary_metrics(sleepy, pred)
+    s = pd.DataFrame(
+        {"subject": [df["subject"].iloc[0] for df in recs], "drowsy": drowsy, "t": alert_time}
+    )
+    sessions = er.held_out_predictions(
+        s["t"], s["drowsy"], s["subject"], lambda v: np.linspace(0, 1, 101), "accuracy"
+    )
     return {
         "UL-DD AUC": roc_auc(drowsy, means),
+        "UL-DD sessions": binary_metrics(s["drowsy"], sessions)["accuracy"],
         "UL-DD window acc": m["accuracy"],
         "UL-DD window F1": m["f1"],
+        "UL-DD awake warned": float(s.loc[~s["drowsy"], "t"].mean()),
     }
 
 
